@@ -1,0 +1,39 @@
+name: Sync to Hugging Face Spaces
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Push Backend to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # 1. Konfigurasi identitas Git di runner GitHub Actions
+          git config --global user.email "mfirsyah@users.noreply.github.com"
+          git config --global user.name "MFirSyah"
+          
+          # 2. Clone repositori Hugging Face Space ke folder temporary 'hf_space'
+          # CATATAN: Ubah 'compintel-backend' di bawah ini jika nama Space Hugging Face Anda berbeda!
+          git clone https://MFirSyah:$HF_TOKEN@huggingface.co/spaces/MFirSyah/compintel-backend hf_space
+          
+          # 3. Bersihkan file lama di folder hf_space (kecuali README.md yang berisi metadata penting Space)
+          find hf_space -maxdepth 1 ! -name 'hf_space' ! -name 'README.md' ! -name '.git' -exec rm -rf {} +
+          
+          # 4. Salin SELURUH ISI folder backend dari GitHub ke folder hf_space
+          cp -r backend/* hf_space/
+          
+          # 5. Pindah ke direktori hf_space, commit, dan push ke Hugging Face
+          cd hf_space
+          git add .
+          # Hanya lakukan commit jika ada perubahan file baru
+          git diff-index --quiet HEAD || git commit -m "Sync backend from GitHub Action"
+          git push origin main
