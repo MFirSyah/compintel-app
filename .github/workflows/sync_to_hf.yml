@@ -22,8 +22,8 @@ jobs:
           git config --global user.name "MFirSyah"
           
           # 2. Clone repositori Hugging Face Space ke folder temporary 'hf_space'
-          # CATATAN: Ubah 'compintel-backend' di bawah ini jika nama Space Hugging Face Anda berbeda!
-          git clone https://MFirSyah:$HF_TOKEN@huggingface.co/spaces/MFirSyah/compintel-backend hf_space
+          git clone https://firmanardiansyah23:$HF_TOKEN@huggingface.co/spaces/firmanardiansyah23/compintel-backend hf_space
+
           
           # 3. Bersihkan file lama di folder hf_space (kecuali README.md yang berisi metadata penting Space)
           find hf_space -maxdepth 1 ! -name 'hf_space' ! -name 'README.md' ! -name '.git' -exec rm -rf {} +
