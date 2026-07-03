@@ -1,0 +1,12 @@
+# Exclude backend and ML models from Vercel deployment to prevent size limits
+backend/
+model_sbert_local/
+models/
+DATA/
+.git/
+.venv/
+__pycache__/
+*.npy
+*.xlsx
+*.pdf
+*.mpeg

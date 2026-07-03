@@ -1,0 +1,1930 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COMPINTEL - Hybrid TF-IDF + SBERT</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], title: ['Outfit', 'sans-serif'] }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background: #f8fafc; }
+        .glass { background: rgba(255,255,255,0.9); backdrop-filter: blur(20px); border: 1px solid rgba(15,23,42,0.08); box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        .glass:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.12); }
+        .text-glow { background: linear-gradient(135deg, #1e293b 30%, #1d4ed8 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .pulse-dot { width: 10px; height: 10px; background: #10b981; border-radius: 50%; position: relative; }
+        .pulse-dot::after { content: ''; position: absolute; width: 100%; height: 100%; border-radius: 50%; background: #10b981; animation: pulse 1.8s infinite; top: 0; left: 0; }
+        @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(2.8); opacity: 0; } }
+        .float { animation: float 3s ease-in-out infinite; }
+        @keyframes float { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-12px) rotate(180deg); } }
+        .tab-content { display: none; opacity: 0; transform: scale(0.98) translateY(10px); transition: all 0.3s; }
+        .tab-content.active { display: block; opacity: 1; transform: scale(1) translateY(0); }
+        .toast-in { animation: toastIn 0.4s forwards; }
+        @keyframes toastIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .spinner { border: 3px solid rgba(15,23,42,0.1); border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .shimmer { background: linear-gradient(90deg, rgba(59,130,246,0.8) 0%, rgba(139,92,246,0.8) 50%, rgba(59,130,246,0.8) 100%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .btn-glow:hover { box-shadow: 0 0 20px rgba(59,130,246,0.4); }
+        .cheaper { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+        .expensive { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+        .hover-row:hover { background: rgba(59,130,246,0.05); }
+        .load-overlay { position: fixed; inset: 0; background: #f8fafc; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .overflow-auto { overflow-y: auto; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        ::-webkit-scrollbar-corner { background: #f1f5f9; }
+        .suggestion-item { cursor: pointer; }
+        .suggestion-item:hover { background: #eff6ff; }
+    </style>
+</head>
+<body class="text-slate-800 min-h-screen flex">
+
+    <!-- Loading -->
+    <div id="loading" class="load-overlay">
+        <div class="spinner w-16 h-16 mb-6"></div>
+        <h2 class="text-2xl font-bold font-title text-slate-800 mb-2">Memuat Data...</h2>
+        <p class="text-slate-500 mb-4">Hybrid TF-IDF + SBERT</p>
+        <div class="w-64 bg-slate-200 rounded-full h-2 overflow-hidden">
+            <div id="progress-bar" class="shimmer h-full transition-all duration-300" style="width:0%"></div>
+        </div>
+        <p id="progress-text" class="text-xs text-slate-400 mt-2">0%</p>
+        <p id="progress-detail" class="text-xs text-slate-400 mt-1"></p>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-3 max-w-sm"></div>
+
+    <!-- App -->
+    <div id="app" class="flex w-full h-screen opacity-0 transition-opacity duration-500">
+
+        <!-- Sidebar -->
+        <aside class="w-64 bg-white border-r border-slate-200 flex flex-col h-screen shrink-0">
+            <div class="p-5 border-b border-slate-100">
+                <div class="flex items-center gap-3 mb-1">
+                    <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-blue-600 to-purple-600 flex items-center justify-center">
+                        <i class="fa-solid fa-brain text-white text-sm"></i>
+                    </div>
+                    <span class="text-xl font-bold">COMP<span class="text-blue-500">INTEL</span></span>
+                </div>
+                <span class="text-[10px] text-slate-400 font-mono uppercase">Hybrid TF-IDF + SBERT</span>
+            </div>
+
+            <div class="p-4 border-b border-slate-100 space-y-2">
+                <!-- Database Count Widget -->
+                <div class="bg-slate-100 p-3 rounded-xl">
+                    <div class="flex justify-between mb-2">
+                        <span class="text-[10px] text-slate-500 uppercase">Database</span>
+                        <div class="pulse-dot" id="db-pulse-dot"></div>
+                    </div>
+                    <div class="text-lg font-bold text-slate-800" id="db-count">0</div>
+                    <div class="text-[10px] text-slate-400">produk</div>
+                </div>
+                <!-- API Connection Widget -->
+                <div class="bg-slate-100 p-3 rounded-xl">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-[10px] text-slate-500 uppercase">Status API</span>
+                        <div class="w-2.5 h-2.5 rounded-full bg-orange-500" id="api-status-dot"></div>
+                    </div>
+                    <div class="text-xs font-bold text-slate-700" id="api-status-text">OFFLINE (Simulasi)</div>
+                    <div class="mt-2 hidden" id="api-url-container">
+                        <input type="text" id="api-url-input" class="w-full text-[10px] p-1.5 border border-slate-200 rounded outline-none focus:ring-1 focus:ring-blue-500" value="http://localhost:8000" placeholder="API URL">
+                        <button onclick="saveApiUrl()" class="w-full mt-1 bg-blue-500 text-white text-[10px] py-1 rounded font-bold hover:bg-blue-600 transition-colors">Simpan</button>
+                    </div>
+                    <button onclick="toggleApiSettings()" class="text-[9px] text-blue-500 hover:underline mt-1 block">Pengaturan API</button>
+                </div>
+            </div>
+
+
+            <nav class="flex-1 p-3 space-y-1 overflow-y-auto">
+                <button onclick="switchTab('matching')" id="nav-matching" class="nav-btn w-full text-left p-3 rounded-xl bg-blue-600 text-white shadow-sm flex items-center justify-between">
+                    <span class="flex items-center gap-3"><i class="fa-solid fa-magnifying-glass"></i><span class="text-sm">Smart Matching</span></span>
+                    <span class="text-[10px] bg-blue-800 px-2 py-0.5 rounded-full">AI</span>
+                </button>
+                <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-btn w-full text-left p-3 rounded-xl hover:bg-slate-100 text-slate-600 flex items-center gap-3">
+                    <i class="fa-solid fa-chart-line text-purple-500"></i><span class="text-sm">Dashboard</span>
+                </button>
+                <button onclick="switchTab('analisis')" id="nav-analisis" class="nav-btn w-full text-left p-3 rounded-xl hover:bg-slate-100 text-slate-600 flex items-center gap-3">
+                    <i class="fa-solid fa-clock-history text-emerald-500"></i><span class="text-sm">Analisis</span>
+                </button>
+                <button onclick="switchTab('data')" id="nav-data" class="nav-btn w-full text-left p-3 rounded-xl hover:bg-slate-100 text-slate-600 flex items-center gap-3">
+                    <i class="fa-solid fa-database text-amber-500"></i><span class="text-sm">Pusat Data</span>
+                </button>
+                <button onclick="switchTab('info')" id="nav-info" class="nav-btn w-full text-left p-3 rounded-xl hover:bg-slate-100 text-slate-600 flex items-center gap-3">
+                    <i class="fa-solid fa-info-circle text-blue-500"></i><span class="text-sm">Info Metode</span>
+                </button>
+            </nav>
+
+            <div class="p-4 text-xs text-slate-400 border-t border-slate-100 text-center">
+                v2.0 | Data Asli
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-hidden">
+            <div class="h-full overflow-y-auto scroll-smooth p-6">
+            <!-- TAB: Matching -->
+            <section id="view-matching" class="tab-content active">
+                <header class="p-6 border-b border-slate-200">
+                    <h1 class="text-3xl font-extrabold font-title text-slate-800"><span class="text-glow">Pencocokan Produk Hybrid</span></h1>
+                    <p class="text-slate-500 text-sm mt-1">TF-IDF N-Gram + SBERT Fine-tuned (Pararel)</p>
+                </header>
+
+                <div class="p-6 flex flex-col gap-6">
+                    <!-- Search Bar -->
+                    <div class="glass p-5 rounded-2xl relative z-50">
+                        <div class="flex flex-wrap gap-4 items-end">
+                            <div class="flex-1 min-w-[300px]">
+                                <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase">Nama Produk DB KLIK</label>
+                                <div style="position: relative; width: 100%;" id="search-input-wrapper">
+                                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-400 z-10"></i>
+                                    <input type="text" id="search-query" class="w-full pl-11 pr-4 py-3 bg-slate-100 border border-slate-200 text-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Ketik nama produk (misal: TP-LINK, TPLINK, TP LINK)..." autocomplete="off">
+                                    <div id="search-suggestions" style="position: absolute; top: 100%; left: 0; width: 100%; margin-top: 6px; z-index: 99999;" class="bg-white rounded-xl shadow-2xl border border-slate-200 hidden max-h-72 overflow-y-auto"></div>
+                                </div>
+                            </div>
+                            <div class="w-48">
+                                <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase">Filter Brand</label>
+                                <select id="filter-brand" onchange="showSuggestions(document.getElementById('search-query').value)" class="w-full px-4 py-3 bg-slate-100 border border-slate-200 text-slate-800 rounded-xl outline-none">
+                                    <option value="">Semua Brand</option>
+                                </select>
+                            </div>
+                            <div class="w-64">
+                                <label class="block text-xs font-semibold text-slate-600 mb-1.5 uppercase flex justify-between">
+                                    <span>Threshold Hybrid</span>
+                                    <span id="threshold-val" class="text-blue-500 font-bold">0.75</span>
+                                </label>
+                                <input type="range" id="threshold-slider" min="0.1" max="1" step="0.05" value="0.75" class="w-full" oninput="document.getElementById('threshold-val').textContent = parseFloat(this.value).toFixed(2)">
+                            </div>
+                            <button onclick="performSearch()" class="btn-glow px-7 py-3 bg-gradient-to-r from-blue-600 to-blue-500 text-white font-bold rounded-xl shadow-lg h-[50px]">
+                                <i class="fa-solid fa-bolt text-amber-300 mr-2"></i>Analisa Hybrid
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Filter -->
+                    <div class="glass p-5 rounded-2xl relative z-10">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">
+                            <i class="fa-solid fa-filter text-blue-500"></i> Toko Kompetitor
+                        </h3>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2" id="stores-container"></div>
+                    </div>
+
+                    <!-- Results -->
+                    <div class="glass rounded-2xl flex flex-col relative z-0">
+                        <div class="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                            <h2 class="font-bold text-slate-800 flex items-center gap-2">
+                                <i class="fa-solid fa-layer-group text-blue-500"></i> Hasil Hybrid (TF-IDF + SBERT)
+                                <span id="match-count" class="text-xs text-slate-500 ml-2">0 produk</span>
+                            </h2>
+                            <div class="flex gap-3">
+                                <button onclick="analyzeSelected()" id="analyze-btn" disabled class="px-4 py-2 bg-emerald-600 disabled:opacity-40 text-white text-xs font-bold rounded-xl flex items-center gap-2">
+                                    <i class="fa-solid fa-chart-line"></i>Analisis
+                                </button>
+                                <button onclick="exportResults()" class="px-4 py-2 bg-slate-100 border border-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center gap-2">
+                                    <i class="fa-solid fa-file-csv text-emerald-500"></i>Export
+                                </button>
+                            </div>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left min-w-[800px]">
+                                <thead class="bg-slate-50 text-slate-500 text-[11px] uppercase sticky top-0 z-10">
+                                    <tr class="border-b border-slate-200">
+                                        <th class="p-4 w-12 text-center"><input type="checkbox" id="select-all" onchange="toggleAll(this)"></th>
+                                        <th class="p-4 w-1/3">Nama Produk</th>
+                                        <th class="p-4">Toko</th>
+                                        <th class="p-4 text-right">Harga</th>
+                                        <th class="p-4 text-right">Terjual</th>
+                                        <!-- Header diperlebar untuk detail skor -->
+                                        <th class="p-4 w-48">Detail Skor Kemiripan</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="results-body" class="text-sm divide-y divide-slate-100">
+                                    <tr><td colspan="6" class="p-20 text-center text-slate-400"><i class="fa-solid fa-robot text-6xl mb-4 text-slate-300"></i><p class="text-lg font-bold">Sistem Siap</p></td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB: Dashboard -->
+            <section id="view-dashboard" class="tab-content">
+                <header class="mb-6">
+                    <h1 class="text-3xl font-extrabold font-title text-slate-800"><span class="text-glow">Market Dashboard</span></h1>
+                    <p class="text-slate-500 mt-1">Statistik dan visualisasi data kompetitor</p>
+                </header>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div class="glass p-5 rounded-2xl border-l-4 border-l-blue-500">
+                        <span class="text-xs text-slate-500 uppercase font-semibold">Total Produk</span>
+                        <div class="text-3xl font-bold text-slate-800 mt-2" id="db-total">0</div>
+                    </div>
+                    <div class="glass p-5 rounded-2xl border-l-4 border-l-purple-500">
+                        <span class="text-xs text-slate-500 uppercase font-semibold">Toko Kompetitor</span>
+                        <div class="text-3xl font-bold text-slate-800 mt-2" id="db-stores">0</div>
+                    </div>
+                    <div class="glass p-5 rounded-2xl border-l-4 border-l-emerald-500">
+                        <span class="text-xs text-slate-500 uppercase font-semibold">Produk Ready</span>
+                        <div class="text-3xl font-bold text-slate-800 mt-2" id="db-ready">0</div>
+                    </div>
+                    <div class="glass p-5 rounded-2xl border-l-4 border-l-red-500">
+                        <span class="text-xs text-slate-500 uppercase font-semibold">Produk Habis</span>
+                        <div class="text-3xl font-bold text-slate-800 mt-2" id="db-habis">0</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+                    <div class="glass p-6 rounded-2xl lg:col-span-2">
+                        <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <i class="fa-solid fa-chart-line text-blue-500"></i> Tren Harga Rata-Rata Semua Toko
+                        </h3>
+                        <div class="h-[300px]">
+                            <canvas id="trendChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="glass p-6 rounded-2xl">
+                        <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <i class="fa-solid fa-ranking-star text-amber-500"></i> Ranking Agresivitas Harga
+                        </h3>
+                        <div class="space-y-4" id="ranking-list"></div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="glass p-6 rounded-2xl">
+                        <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <i class="fa-solid fa-check-circle text-emerald-500"></i> Total Produk per Toko
+                        </h3>
+                        <div class="h-[250px]">
+                            <canvas id="readyChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="glass p-6 rounded-2xl">
+                        <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <i class="fa-solid fa-tags text-purple-500"></i> Brand Distribution
+                        </h3>
+                        <div class="h-[250px]">
+                            <canvas id="brandChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="glass p-6 rounded-2xl">
+                        <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <i class="fa-solid fa-wallet text-amber-500"></i> Distribusi Harga
+                        </h3>
+                        <div class="h-[250px]">
+                            <canvas id="priceDistChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB: Analisis -->
+            <section id="view-analisis" class="tab-content">
+                <header class="mb-6 flex justify-between items-start">
+                    <div>
+                        <h1 class="text-3xl font-extrabold font-title text-slate-800"><span class="text-glow">Analisis Detail</span></h1>
+                        <p class="text-slate-500 mt-1">Riwayat waktu produk terpilih</p>
+                    </div>
+                    <button onclick="resetAnalysis()" class="px-4 py-2 bg-slate-100 border border-slate-200 text-slate-700 text-xs font-bold rounded-xl">Reset</button>
+                </header>
+
+                <div class="space-y-6">
+                    <div class="glass p-4 rounded-xl">
+                        <h4 class="text-xs font-bold text-slate-500 uppercase mb-3">Produk Dianalisis</h4>
+                        <div class="flex flex-wrap gap-2" id="selected-products"></div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div class="glass p-6 rounded-2xl">
+                            <h4 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                <i class="fa-solid fa-chart-line text-blue-500"></i> Tren Harga per Toko
+                            </h4>
+                            <div class="h-[280px]">
+                                <canvas id="priceChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="glass p-6 rounded-2xl">
+                            <h4 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                <i class="fa-solid fa-chart-line text-emerald-500"></i> Tren Penjualan per Toko
+                            </h4>
+                            <div class="h-[280px]">
+                                <canvas id="salesChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="glass rounded-2xl">
+                        <div class="p-5 border-b border-slate-100 bg-slate-50">
+                            <h3 class="font-bold text-slate-800 flex items-center gap-2">
+                                <i class="fa-solid fa-list-check text-blue-500"></i> Data Historis
+                                <span id="history-count" class="text-xs text-slate-500 ml-2">0 record</span>
+                            </h3>
+                        </div>
+                        <div class="overflow-x-auto max-h-[400px]">
+                            <table class="w-full text-left text-xs">
+                                <thead class="bg-slate-50 sticky top-0">
+                                    <tr class="text-slate-500 uppercase border-b border-slate-200">
+                                        <th class="p-3">Tanggal</th>
+                                        <th class="p-3">Nama</th>
+                                        <th class="p-3">Toko</th>
+                                        <th class="p-3 text-right">Harga</th>
+                                        <th class="p-3 text-right">Terjual</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="history-table" class="divide-y divide-slate-100"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB: Data -->
+            <section id="view-data" class="tab-content">
+                <header class="mb-6">
+                    <h1 class="text-3xl font-extrabold font-title text-slate-800"><span class="text-glow">Pusat Data</span></h1>
+                    <p class="text-slate-500 mt-1">Kelola data produk dari berbagai toko</p>
+                </header>
+
+                <!-- CSV Uploader Section -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                    <!-- Drop Zone -->
+                    <div class="glass p-5 rounded-2xl lg:col-span-2">
+                        <h3 class="text-sm font-bold text-slate-700 uppercase mb-3 flex items-center gap-2">
+                            <i class="fa-solid fa-cloud-arrow-up text-blue-500"></i> Upload Data Kompetitor (CSV)
+                        </h3>
+                        <div id="drop-zone" class="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-500 transition-colors" ondragover="event.preventDefault()" ondrop="handleFileDrop(event)" onclick="document.getElementById('file-input').click()">
+                            <i class="fa-solid fa-file-csv text-4xl text-slate-400 mb-3" id="upload-icon"></i>
+                            <p class="text-sm text-slate-600 font-medium" id="upload-text">Seret file CSV ke sini atau klik untuk memilih</p>
+                            <p class="text-xs text-slate-400 mt-1">Format nama: dd-mm-yyyy_NamaToko_Ready.csv</p>
+                            <input type="file" id="file-input" class="hidden" accept=".csv" onchange="handleFileSelect(event)">
+                        </div>
+                        <div id="preview-container" class="mt-4 hidden">
+                            <h4 class="text-xs font-bold text-slate-500 uppercase mb-2">Preview File: <span id="preview-filename" class="text-blue-500"></span></h4>
+                            <div class="overflow-x-auto max-h-40 border border-slate-200 rounded-lg">
+                                <table class="w-full text-left text-xs">
+                                    <thead class="bg-slate-50 text-slate-600 uppercase font-semibold">
+                                        <tr>
+                                            <th class="p-2">Nama</th>
+                                            <th class="p-2 text-right">Harga</th>
+                                            <th class="p-2 text-right">Terjual</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="preview-table-body" class="divide-y divide-slate-100 text-slate-600"></tbody>
+                                </table>
+                            </div>
+                            <div class="flex justify-end gap-3 mt-3">
+                                <button onclick="cancelUpload()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg">Batal</button>
+                                <button onclick="uploadFile()" id="confirm-upload-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg flex items-center gap-2">
+                                    <i class="fa-solid fa-cloud-arrow-up"></i>Kirim ke Database
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Upload History -->
+                    <div class="glass p-5 rounded-2xl">
+                        <h3 class="text-sm font-bold text-slate-700 uppercase mb-3 flex items-center gap-2">
+                            <i class="fa-solid fa-clock-rotate-left text-purple-500"></i> Riwayat Upload
+                        </h3>
+                        <div class="space-y-3 max-h-48 overflow-y-auto pr-1" id="upload-history-list">
+                            <div class="text-xs text-slate-400 text-center py-8">Belum ada riwayat upload</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass rounded-2xl">
+                    <div class="p-5 border-b border-slate-100 bg-slate-50">
+
+                        <div class="flex flex-wrap justify-between items-center gap-4">
+                            <h3 class="font-bold text-slate-800 flex items-center gap-2">
+                                <i class="fa-solid fa-table text-blue-500"></i> Data Produk
+                            </h3>
+                            <div class="flex flex-wrap items-center gap-3">
+                                <div class="flex items-center gap-2">
+                                    <label class="text-xs text-slate-500">Tanggal:</label>
+                                    <input type="date" id="filter-date-start" onchange="renderDataTable()" class="bg-white border border-slate-200 text-slate-700 text-xs rounded-lg px-3 py-2">
+                                    <span class="text-slate-400">-</span>
+                                    <input type="date" id="filter-date-end" onchange="renderDataTable()" class="bg-white border border-slate-200 text-slate-700 text-xs rounded-lg px-3 py-2">
+                                </div>
+                                <select id="filter-store" onchange="renderDataTable()" class="bg-white border border-slate-200 text-slate-700 text-xs rounded-lg px-3 py-2">
+                                    <option value="">Semua Toko</option>
+                                </select>
+                                <button onclick="clearDataFilters()" class="px-3 py-2 bg-slate-100 border border-slate-200 text-slate-700 text-xs rounded-lg hover:bg-slate-200">
+                                    <i class="fa-solid fa-times mr-1"></i>Reset
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs min-w-[800px]">
+                            <thead class="bg-slate-50 sticky top-0">
+                                <tr class="text-slate-500 uppercase border-b border-slate-200">
+                                    <th class="p-3">Tanggal</th>
+                                    <th class="p-3">Toko</th>
+                                    <th class="p-3">Nama Produk</th>
+                                    <th class="p-3">Brand</th>
+                                    <th class="p-3 text-right">Harga</th>
+                                    <th class="p-3 text-right">Terjual</th>
+                                </tr>
+                            </thead>
+                            <tbody id="data-table" class="divide-y divide-slate-100"></tbody>
+                        </table>
+                    </div>
+                    <div class="p-4 border-t border-slate-100 bg-slate-50 flex flex-wrap justify-between items-center gap-4">
+                        <div class="text-xs text-slate-500">
+                            Menampilkan <span id="data-showing">0-0</span> dari <span id="data-total">0</span> data
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2" id="pagination-controls">
+                            <button onclick="goToPage(1)" class="px-3 py-1 bg-white border border-slate-200 text-slate-700 text-xs rounded-lg hover:bg-slate-100 disabled:opacity-50" disabled>
+                                <i class="fa-solid fa-angles-left"></i>
+                            </button>
+                            <button onclick="prevPage()" id="btn-prev" class="px-3 py-1 bg-white border border-slate-200 text-slate-700 text-xs rounded-lg hover:bg-slate-100 disabled:opacity-50" disabled>
+                                <i class="fa-solid fa-chevron-left mr-1"></i>Prev
+                            </button>
+                            <div id="page-numbers" class="flex gap-1"></div>
+                            <button onclick="nextPage()" id="btn-next" class="px-3 py-1 bg-white border border-slate-200 text-slate-700 text-xs rounded-lg hover:bg-slate-100 disabled:opacity-50" disabled>
+                                Next<i class="fa-solid fa-chevron-right ml-1"></i>
+                            </button>
+                            <button onclick="goToPage(lastPage)" id="btn-last" class="px-3 py-1 bg-white border border-slate-200 text-slate-700 text-xs rounded-lg hover:bg-slate-100 disabled:opacity-50" disabled>
+                                <i class="fa-solid fa-angles-right"></i>
+                            </button>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <label class="text-xs text-slate-500">Per halaman:</label>
+                            <select id="per-page" onchange="changePerPage()" class="bg-white border border-slate-200 text-slate-700 text-xs rounded-lg px-3 py-2">
+                                <option value="25">25</option>
+                                <option value="50" selected>50</option>
+                                <option value="100">100</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB: Info -->
+            <section id="view-info" class="tab-content">
+                <header class="mb-6">
+                    <h1 class="text-3xl font-extrabold font-title text-slate-800"><span class="text-glow">Informasi Metode</span></h1>
+                    <p class="text-slate-500 mt-1">Dokumentasi dan penjelasan komprehensif algoritma Hybrid TF-IDF + SBERT</p>
+                </header>
+
+                <div class="space-y-6">
+                    <!-- TF-IDF Section -->
+                    <div class="glass p-6 rounded-2xl border-l-4 border-l-blue-500">
+                        <h3 class="text-xl font-bold text-slate-800 mb-3 flex items-center gap-2">
+                            <i class="fa-solid fa-file-word text-blue-500"></i> TF-IDF (Term Frequency-Inverse Document Frequency) N-Gram
+                        </h3>
+                        <p class="text-sm text-slate-600 mb-3 leading-relaxed">
+                            Metode TF-IDF pada aplikasi ini menggunakan teknik <strong>char_wb (Character Word Boundaries) N-Gram (2,3)</strong>. Artinya, setiap nama produk dipecah menjadi susunan huruf (2 sampai 3 huruf). Keunggulannya adalah metode ini sangat handal dalam menangani <em>typo</em> (salah ketik) atau variasi penulisan.
+                        </p>
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                            <p class="text-xs text-slate-500 mb-1"><strong>Contoh Kasus:</strong></p>
+                            <p class="text-sm text-slate-700">Jika nama di database adalah <span class="font-mono text-blue-600">"TPLINK Router"</span> dan kompetitor menulis <span class="font-mono text-blue-600">"TP-LINK Router"</span>, algoritma ini akan memecah katanya menjadi n-gram <em>(tp, pl, lin, ink...)</em> sehingga meskipun ada perbedaan tanda baca/strip, kemiripannya tetap dinilai sangat tinggi.</p>
+                        </div>
+                    </div>
+
+                    <!-- SBERT Section -->
+                    <div class="glass p-6 rounded-2xl border-l-4 border-l-purple-500">
+                        <h3 class="text-xl font-bold text-slate-800 mb-3 flex items-center gap-2">
+                            <i class="fa-solid fa-brain text-purple-500"></i> SBERT (Sentence-BERT) Paraphrase Multilingual
+                        </h3>
+                        <p class="text-sm text-slate-600 mb-3 leading-relaxed">
+                            Sentence-BERT berbasis pada model bahasa Deep Learning (<span class="font-mono bg-slate-100 px-1 rounded">paraphrase-multilingual-MiniLM-L12-v2</span>) yang mampu memahami <strong>Konteks Semantik</strong> dari sebuah nama produk. Tidak seperti TF-IDF yang mencocokkan huruf, SBERT mencocokkan makna dari kalimat.
+                        </p>
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                            <p class="text-xs text-slate-500 mb-1"><strong>Contoh Kasus:</strong></p>
+                            <p class="text-sm text-slate-700">Kata <span class="font-mono text-purple-600">"Graphic Card"</span> dan <span class="font-mono text-purple-600">"VGA"</span> memiliki susunan huruf yang sama sekali berbeda (TF-IDF akan bernilai 0%), namun SBERT mengerti bahwa secara semantik, kedua benda tersebut adalah produk yang sama sehingga akan memberikan skor tinggi.</p>
+                        </div>
+                    </div>
+
+                    <!-- Hybrid Explanation -->
+                    <div class="glass p-6 rounded-2xl border-2 border-emerald-400">
+                        <h3 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <i class="fa-solid fa-code-merge text-emerald-500"></i> Arsitektur Hybrid (Penggabungan Paralel)
+                        </h3>
+                        <p class="text-sm text-slate-600 mb-4 leading-relaxed">
+                            Kedua algoritma di atas memiliki kelemahan masing-masing. TF-IDF lemah dalam persamaan sinonim kata, sedangkan SBERT sering salah jika model/seri produknya mirip tapi spesifikasinya beda jauh (Misal: <em>GTX 1050</em> vs <em>GTX 1080</em> - dianggap sama maknanya oleh SBERT). Oleh karena itu, kita menggabungkannya:
+                        </p>
+                        <div class="bg-emerald-50 p-4 rounded-xl mb-6 text-center shadow-inner">
+                            <div class="font-mono text-lg text-emerald-700 mb-2"><strong>Skor_Hybrid = (Skor_TFIDF + Skor_SBERT) / 2</strong></div>
+                            <p class="text-xs text-slate-600">Skor rata-rata dari kedua metode memberikan hasil yang saling menutupi kekurangan (kompensasi), menghasilkan evaluasi pencocokan yang sangat akurat.</p>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
+                            <div class="space-y-3">
+                                <h4 class="font-bold text-slate-700 border-b border-slate-200 pb-2">Spesifikasi Algoritma</h4>
+                                <p class="text-sm text-slate-600"><i class="fa-solid fa-check-circle text-emerald-500 w-5"></i><strong>Paralel:</strong> Menjalankan simulasi TF-IDF dan SBERT secara simultan/bersamaan</p>
+                                <p class="text-sm text-slate-600"><i class="fa-solid fa-balance-scale text-blue-500 w-5"></i><strong>Threshold Default:</strong> 0.75 (Toleransi batas minimal mirip)</p>
+                                <p class="text-sm text-slate-600"><i class="fa-solid fa-percentage text-purple-500 w-5"></i><strong>F1-Score Akurasi:</strong> 92.25% (Sangat cocok untuk produk E-Commerce)</p>
+                            </div>
+                            <div class="space-y-3">
+                                <h4 class="font-bold text-slate-700 border-b border-slate-200 pb-2">Keunggulan Hasil Hybrid</h4>
+                                <p class="text-sm text-slate-600"><i class="fa-solid fa-shield-halved text-emerald-500 w-5"></i><strong>Robust (Kuat):</strong> Tidak mudah terkecoh oleh perbedaan cara penulisan gelar produk.</p>
+                                <p class="text-sm text-slate-600"><i class="fa-solid fa-magnifying-glass text-blue-500 w-5"></i><strong>Identifikasi Akurat:</strong> Meminimalisir <em>False-Positive</em> (Produk beda dianggap sama).</p>
+                                <p class="text-sm text-slate-600"><i class="fa-solid fa-bolt text-amber-500 w-5"></i><strong>Efisien:</strong> Analisis ribuan baris dengan respon instan.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Catatan Penting -->
+                    <div class="glass p-6 rounded-2xl border-l-4 border-l-amber-500">
+                        <h3 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <i class="fa-solid fa-exclamation-circle text-amber-500"></i> Catatan Penting / Dataset
+                        </h3>
+                        <div class="bg-amber-50 p-4 rounded-xl mb-4">
+                            <p class="text-sm text-slate-700">Aplikasi analisa kompetitor ini dibuat berdasarkan pemrosesan <strong>data historis asli</strong> dari 10 toko komputer E-Commerce:</p>
+                        </div>
+                        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm text-slate-600 font-medium">
+                            <div class="bg-white border border-slate-200 p-2 rounded-lg text-center shadow-sm">DB KLIK</div>
+                            <div class="bg-white border border-slate-200 p-2 rounded-lg text-center shadow-sm">ABDITAMA</div>
+                            <div class="bg-white border border-slate-200 p-2 rounded-lg text-center shadow-sm">LEVEL99</div>
+                            <div class="bg-white border border-slate-200 p-2 rounded-lg text-center shadow-sm">IT SHOP</div>
+                            <div class="bg-white border border-slate-200 p-2 rounded-lg text-center shadow-sm">JAYA PC</div>
+                            <div class="bg-white border border-slate-200 p-2 rounded-lg text-center shadow-sm">MULTIFUNGSI</div>
+                            <div class="bg-white border border-slate-200 p-2 rounded-lg text-center shadow-sm">TECH ISLAND</div>
+                            <div class="bg-white border border-slate-200 p-2 rounded-lg text-center shadow-sm">GG STORE</div>
+                            <div class="bg-white border border-slate-200 p-2 rounded-lg text-center shadow-sm">SURYA MITRA</div>
+                            <div class="bg-white border border-slate-200 p-2 rounded-lg text-center shadow-sm">LOGITECH</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+        </main>
+    </div>
+
+    <script>
+        // ========================================================================
+        // CONFIG
+        // ========================================================================
+        var CONFIG = {
+            tfidf: { analyzer: 'char_wb', ngram_range: [2, 3], threshold: 0.67 },
+            sbert: { model: 'paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, threshold: 0.84 },
+            hybrid: { formula: '(TF-IDF + SBERT) / 2', default_threshold: 0.75, f1_score: '92.25%' },
+            dataPath: '../DATA/'
+        };
+
+        // ========================================================================
+        // STATE
+        // ========================================================================
+        var dbKlikProducts = [];
+        var competitorProducts = [];
+        var fullHistoryData = [];
+        var stores = [];
+        var brands = [];
+        var searchResults = [];
+        var selectedForAnalysis = [];
+        var trendChart = null, priceChart = null, salesChart = null;
+        var readyChart = null, brandChart = null, priceDistChart = null;
+        var productNames = [];
+        var productMap = {};
+        var brandMapping = {};  // Kamus alias -> brand utama
+        var knownBrands = [];   // Daftar brand utama yang valid
+        var apiOnline = false;
+        var apiUrl = localStorage.getItem('compintel_api_url') || 'http://localhost:8000';
+        var selectedFile = null;
+
+
+        // Pagination state
+        var dataPage = 1;
+        var dataPerPage = 50;
+        var filteredData = [];
+        var lastPage = 1;
+
+        // INIT GUARD
+        var isInitialized = false;
+        var initInProgress = false;
+
+        // ========================================================================
+        // API CONFIGURATION & UPLOAD LOGIC
+        // ========================================================================
+        function toggleApiSettings() {
+            var container = document.getElementById('api-url-container');
+            container.classList.toggle('hidden');
+            document.getElementById('api-url-input').value = apiUrl;
+        }
+
+        function saveApiUrl() {
+            var url = document.getElementById('api-url-input').value.trim();
+            if (!url) return;
+            apiUrl = url;
+            localStorage.setItem('compintel_api_url', url);
+            toggleApiSettings();
+            checkApiHealth();
+        }
+
+        async function checkApiHealth() {
+            var dot = document.getElementById('api-status-dot');
+            var textEl = document.getElementById('api-status-text');
+            
+            try {
+                var response = await fetch(apiUrl + '/health');
+                var data = await response.json();
+                if (response.ok && data.status === 'healthy') {
+                    apiOnline = true;
+                    dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500';
+                    textEl.textContent = 'ONLINE';
+                    
+                    // Fetch actual database stats
+                    var statsResponse = await fetch(apiUrl + '/api/dashboard/stats/');
+                    var stats = await statsResponse.json();
+                    if (stats.total_produk !== undefined) {
+                        document.getElementById('db-count').textContent = stats.total_produk.toLocaleString('id-ID');
+                        document.getElementById('db-total').textContent = stats.total_produk.toLocaleString('id-ID');
+                        document.getElementById('db-stores').textContent = stats.total_toko;
+                    }
+                    
+                    loadUploadHistory();
+                    return;
+                }
+            } catch (e) {
+                console.log('[API Connection] Offline, using simulation fallback.');
+            }
+            
+            apiOnline = false;
+            dot.className = 'w-2.5 h-2.5 rounded-full bg-orange-500';
+            textEl.textContent = 'OFFLINE (Simulasi)';
+            if (competitorProducts.length > 0) {
+                document.getElementById('db-count').textContent = competitorProducts.length.toLocaleString('id-ID');
+            }
+        }
+
+        function handleFileDrop(e) {
+            e.preventDefault();
+            if (e.dataTransfer.files.length > 0) {
+                processFile(e.dataTransfer.files[0]);
+            }
+        }
+
+        function handleFileSelect(e) {
+            if (e.target.files.length > 0) {
+                processFile(e.target.files[0]);
+            }
+        }
+
+        function processFile(file) {
+            if (!file.name.endsWith('.csv')) {
+                showToast('error', 'File Invalid', 'Hanya menerima file format .csv!');
+                return;
+            }
+            
+            // Validate filename format (dd-mm-yyyy_NamaToko_Ready.csv)
+            var parts = file.name.replace('.csv', '').split('_');
+            if (parts.length < 3) {
+                showToast('error', 'Filename Invalid', 'Format penamaan file harus: dd-mm-yyyy_NamaToko_Status.csv');
+                return;
+            }
+
+            selectedFile = file;
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var text = e.target.result;
+                var lines = text.split('\n');
+                if (lines.length < 2) {
+                    showToast('error', 'File Kosong', 'File CSV tidak berisi data!');
+                    return;
+                }
+                
+                // Parse headers
+                var headers = lines[0].split(',').map(function(h) { return h.trim().toUpperCase(); });
+                var required = ['NAMA', 'HARGA', 'TERJUAL/BLN'];
+                var missing = required.filter(function(r) { return headers.indexOf(r) === -1; });
+                
+                if (missing.length > 0) {
+                    showToast('error', 'Header Invalid', 'Kolom wajib tidak ditemukan: ' + missing.join(', '));
+                    return;
+                }
+
+                // Show preview (first 5 rows)
+                var previewBody = document.getElementById('preview-table-body');
+                var html = '';
+                var count = 0;
+                
+                var nameIdx = headers.indexOf('NAMA');
+                var hargaIdx = headers.indexOf('HARGA');
+                var terjualIdx = headers.indexOf('TERJUAL/BLN');
+
+                for (var i = 1; i < lines.length && count < 5; i++) {
+                    var line = lines[i].trim();
+                    if (!line) continue;
+                    
+                    var cols = line.split(',');
+                    if (cols.length > Math.max(nameIdx, hargaIdx, terjualIdx)) {
+                        var name = cols[nameIdx].replace(/"/g, '');
+                        var harga = parseInt(cols[hargaIdx]) || 0;
+                        var terjual = parseInt(cols[terjualIdx]) || 0;
+                        
+                        html += '<tr>' +
+                            '<td class="p-2 font-medium truncate max-w-xs">' + name + '</td>' +
+                            '<td class="p-2 text-right">Rp ' + harga.toLocaleString('id-ID') + '</td>' +
+                            '<td class="p-2 text-right">' + terjual + '</td>' +
+                            '</tr>';
+                        count++;
+                    }
+                }
+                
+                previewBody.innerHTML = html;
+                document.getElementById('preview-filename').textContent = file.name;
+                document.getElementById('preview-container').classList.remove('hidden');
+                document.getElementById('drop-zone').classList.add('hidden');
+            };
+            reader.readAsText(file);
+        }
+
+        function cancelUpload() {
+            selectedFile = null;
+            document.getElementById('file-input').value = '';
+            document.getElementById('preview-container').classList.add('hidden');
+            document.getElementById('drop-zone').classList.remove('hidden');
+        }
+
+        async function uploadFile() {
+            if (!selectedFile) return;
+            
+            if (!apiOnline) {
+                showToast('error', 'API Offline', 'Fitur upload hanya berfungsi saat backend API terhubung!');
+                return;
+            }
+
+            var btn = document.getElementById('confirm-upload-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="spinner w-4 h-4 mr-2"></div>Mengirim...';
+
+            var formData = new FormData();
+            formData.append('file', selectedFile);
+
+            try {
+                var response = await fetch(apiUrl + '/api/upload-kompetitor/', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                var data = await response.json();
+                if (response.ok && data.success) {
+                    showToast('success', 'Upload Sukses', data.message);
+                    cancelUpload();
+                    loadUploadHistory();
+                    checkApiHealth();
+                } else {
+                    showToast('error', 'Upload Gagal', data.detail || 'Terjadi kesalahan saat upload');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i>Kirim ke Database';
+                }
+            } catch (e) {
+                showToast('error', 'Upload Gagal', 'Koneksi ke API terputus');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i>Kirim ke Database';
+            }
+        }
+
+        async function loadUploadHistory() {
+            if (!apiOnline) return;
+            
+            try {
+                var response = await fetch(apiUrl + '/api/upload/history/');
+                var data = await response.json();
+                if (response.ok && data.data) {
+                    var list = document.getElementById('upload-history-list');
+                    if (data.data.length === 0) {
+                        list.innerHTML = '<div class="text-xs text-slate-400 text-center py-8">Belum ada riwayat upload</div>';
+                        return;
+                    }
+                    
+                    var html = '';
+                    for (var i = 0; i < data.data.length; i++) {
+                        var h = data.data[i];
+                        var statusClass = h.status_upload === 'SUCCESS' ? 'text-emerald-500' : 'text-red-500';
+                        var icon = h.status_upload === 'SUCCESS' ? 'fa-check-circle' : 'fa-circle-xmark';
+                        
+                        html += '<div class="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex items-center justify-between text-xs">' +
+                            '<div class="truncate max-w-[150px]"><div class="font-bold text-slate-700 truncate">' + h.filename + '</div><div class="text-[9px] text-slate-400">' + h.nama_toko + ' | ' + h.row_count + ' baris</div></div>' +
+                            '<div class="flex items-center gap-1.5 ' + statusClass + '"><i class="fa-solid ' + icon + '"></i><span class="font-bold text-[10px]">' + h.status_upload + '</span></div>' +
+                            '</div>';
+                    }
+                    list.innerHTML = html;
+                }
+            } catch (e) {
+                console.log('Error loading upload history:', e);
+            }
+        }
+
+        // ========================================================================
+        // BRAND MAPPING & NORMALIZATION
+        // ========================================================================
+
+
+        // Muat kamus brand dari KAMUS.csv
+        async function loadBrandMapping() {
+            try {
+                var response = await fetch('../DATA/DATA UTAMA/KAMUS.csv');
+                var csvText = await response.text();
+                var lines = csvText.split('\n');
+
+                brandMapping = {};
+                knownBrands = new Set();
+
+                for (var i = 1; i < lines.length; i++) {
+                    var line = lines[i].trim();
+                    if (!line) continue;
+
+                    // Parse CSV dengan handle koma dalam field
+                    var parts = [];
+                    var current = '';
+                    for (var j = 0; j < line.length; j++) {
+                        if (line[j] === ',') {
+                            parts.push(current.trim());
+                            current = '';
+                        } else {
+                            current += line[j];
+                        }
+                    }
+                    parts.push(current.trim());
+
+                    if (parts.length >= 2 && parts[0] && parts[1]) {
+                        var alias = parts[0].toUpperCase();
+                        var brandUtama = parts[1].toUpperCase();
+                        brandMapping[alias] = brandUtama;
+                        knownBrands.add(brandUtama);
+                    }
+                }
+
+                console.log('[Brand Mapping] Loaded ' + Object.keys(brandMapping).length + ' aliases, ' + knownBrands.size + ' brands');
+                return true;
+            } catch (e) {
+                console.error('[Brand Mapping] Error loading:', e);
+                return false;
+            }
+        }
+
+        // Ekstrak dan normalisasi brand dari nama produk
+        function normalizeBrand(productName) {
+            if (!productName) return 'UNKNOWN';
+
+            var nameUpper = productName.toUpperCase();
+            var nameClean = cleanText(productName).toUpperCase();
+
+            // Prioritas 1: Cek exact match di mapping (alias -> brand utama)
+            // Urutkan dari alias terpanjang ke terpendek untuk handle "TPLINK" sebelum "TPLIN"
+            var sortedAliases = Object.keys(brandMapping).sort(function(a, b) { return b.length - a.length; });
+
+            for (var i = 0; i < sortedAliases.length; i++) {
+                var alias = sortedAliases[i];
+                var brandUtama = brandMapping[alias];
+
+                // Cek apakah alias ada di nama produk (case insensitive)
+                // Gunakan word boundary untuk avoid false positive
+                var regex = new RegExp('\\b' + alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+                if (regex.test(nameUpper) || nameClean.indexOf(alias) !== -1) {
+                    return brandUtama;
+                }
+            }
+
+            // Prioritas 2: Cek apakah ada brand utama langsung di nama produk
+            var brandList = Array.from(knownBrands).sort(function(a, b) { return b.length - a.length; });
+            for (var j = 0; j < brandList.length; j++) {
+                var brand = brandList[j];
+                var brandRegex = new RegExp('\\b' + brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+                if (brandRegex.test(nameUpper) || nameClean.indexOf(brand) !== -1) {
+                    return brand;
+                }
+            }
+
+            return 'UNKNOWN';
+        }
+
+        // Apply brand normalization ke semua produk
+        function applyBrandNormalization() {
+            var unknownCount = 0;
+            var fixedCount = 0;
+
+            // Normalisasi competitor products
+            for (var i = 0; i < competitorProducts.length; i++) {
+                var p = competitorProducts[i];
+                var extractedBrand = normalizeBrand(p.nama);
+                if (extractedBrand !== 'UNKNOWN') {
+                    p.brand = extractedBrand;
+                    fixedCount++;
+                } else {
+                    unknownCount++;
+                }
+            }
+
+            // Normalisasi history data
+            for (var j = 0; j < fullHistoryData.length; j++) {
+                var h = fullHistoryData[j];
+                if (h.brand === 'UNKNOWN' || !h.brand) {
+                    var histBrand = normalizeBrand(h.nama);
+                    if (histBrand !== 'UNKNOWN') {
+                        h.brand = histBrand;
+                    }
+                }
+            }
+
+            console.log('[Brand Normalization] Fixed: ' + fixedCount + ', Still UNKNOWN: ' + unknownCount);
+        }
+
+        // ========================================================================
+        // DATA LOADING
+        // ========================================================================
+        async function loadData() {
+            var pb = document.getElementById('progress-bar');
+            var pt = document.getElementById('progress-text');
+            var pd = document.getElementById('progress-detail');
+
+            try {
+                pb.style.width = '10%';
+                pt.textContent = '10%';
+                pd.textContent = 'Memuat kamus brand...';
+
+                // Load kamus brand mapping
+                await loadBrandMapping();
+
+                pb.style.width = '25%';
+                pt.textContent = '25%';
+                pd.textContent = 'Memuat produk DB KLIK...';
+
+                const dbKlikResponse = await fetch(CONFIG.dataPath + 'db_klik_products.json');
+                dbKlikProducts = await dbKlikResponse.json();
+
+                pb.style.width = '45%';
+                pt.textContent = '45%';
+                pd.textContent = 'Memuat produk kompetitor...';
+
+                const compResponse = await fetch(CONFIG.dataPath + 'competitor_products.json');
+                competitorProducts = await compResponse.json();
+
+                pb.style.width = '65%';
+                pt.textContent = '65%';
+                pd.textContent = 'Memuat data history...';
+
+                const historyResponse = await fetch(CONFIG.dataPath + 'full_history_data.json');
+                fullHistoryData = await historyResponse.json();
+
+                pb.style.width = '80%';
+                pt.textContent = '80%';
+                pd.textContent = 'Normalisasi brand dari kamus...';
+
+                // Apply brand normalization menggunakan kamus
+                applyBrandNormalization();
+
+                pb.style.width = '85%';
+                pt.textContent = '85%';
+                pd.textContent = 'Memproses data...';
+
+                var storeSet = {};
+                var brandSet = {};
+                var seenProducts = {};
+
+                for (var i = 0; i < competitorProducts.length; i++) {
+                    storeSet[competitorProducts[i].toko] = true;
+                    brandSet[competitorProducts[i].brand] = true;
+                }
+
+                for (var i = 0; i < dbKlikProducts.length; i++) {
+                    brandSet[dbKlikProducts[i].brand] = true;
+                }
+
+                stores = Object.keys(storeSet).sort();
+                brands = Object.keys(brandSet).sort();
+
+                seenProducts = {};
+                for (var i = 0; i < dbKlikProducts.length; i++) {
+                    var p = dbKlikProducts[i];
+                    if (!seenProducts[p.nama]) {
+                        seenProducts[p.nama] = true;
+                        productNames.push(p.nama);
+                        productMap[p.nama] = { brand: p.brand, clean_nama: p.clean_nama };
+                    }
+                }
+                productNames.sort();
+
+                pb.style.width = '95%';
+                pt.textContent = '95%';
+                pd.textContent = 'Menyiapkan UI...';
+
+                return true;
+            } catch (e) {
+                console.error('Error loading data:', e);
+                return false;
+            }
+        }
+
+        // ========================================================================
+        // TEXT NORMALIZATION
+        // ========================================================================
+
+        function cleanText(text) {
+            return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        }
+
+        // ========================================================================
+        // AUTOCOMPLETE (Diperbarui untuk fitur TP-LINK == TPLINK == TP LINK)
+        // ========================================================================
+        function initAutocomplete() {
+            var brandSelect = document.getElementById('filter-brand');
+            if (brandSelect) {
+                var brandHtml = '<option value="">Semua Brand</option>';
+                for (var j = 0; j < brands.length; j++) {
+                    brandHtml += '<option value="' + brands[j] + '">' + brands[j] + '</option>';
+                }
+                brandSelect.innerHTML = brandHtml;
+            }
+        }
+
+        function showSuggestions(query) {
+            var container = document.getElementById('search-suggestions');
+            var brandFilter = document.getElementById('filter-brand').value;
+
+            if (!query || query.trim().length < 1) {
+                container.style.display = 'none';
+                return;
+            }
+
+            // Dapatkan text super bersih tanpa spasi & strip untuk pencocokan akurat 100%
+            var qSuperClean = query.toLowerCase().replace(/[^a-z0-9]/g, '');
+            // Dapatkan term per kata (dipisah spasi / strip)
+            var qTerms = query.toLowerCase().split(/[\s\-]+/).filter(function(t) { return t.length > 0; });
+
+            var matches = [];
+
+            for (var i = 0; i < productNames.length; i++) {
+                var name = productNames[i];
+                var item = productMap[name];
+                
+                if (brandFilter && item.brand !== brandFilter) continue;
+
+                var cleanName = (item.clean_nama || name).toLowerCase();
+                var targetSuperClean = cleanName.replace(/[^a-z0-9]/g, '');
+
+                var nameMatch = false;
+
+                // 1. Pencocokan langsung teks menempel (misal: "tplink" ketemu di "routertplinkwr840n")
+                if (targetSuperClean.indexOf(qSuperClean) !== -1) {
+                    nameMatch = true;
+                } else {
+                    // 2. Pencocokan urutan acak/parsial (misal: "router tplink" -> "tp-link router")
+                    var allTermsFound = qTerms.every(function(term) {
+                        var termSuper = term.replace(/[^a-z0-9]/g, '');
+                        return targetSuperClean.indexOf(termSuper) !== -1;
+                    });
+                    if (allTermsFound && qTerms.length > 0) {
+                        nameMatch = true;
+                    }
+                }
+
+                if (nameMatch) {
+                    matches.push({ name: name, brand: item.brand });
+                }
+
+                if (matches.length >= 15) break;
+            }
+
+            if (matches.length === 0) {
+                container.innerHTML = '<div class="p-4 text-center text-slate-500 text-sm">Tidak ada produk yang cocok</div>';
+                container.style.display = 'block';
+                return;
+            }
+
+            var html = '';
+            for (var j = 0; j < matches.length; j++) {
+                var match = matches[j];
+                var highlighted = highlightMatch(match.name, query);
+                html += '<div class="suggestion-item px-4 py-3 border-b border-slate-100 text-sm" data-name="' + match.name.replace(/"/g, '&quot;') + '">' +
+                    '<div class="font-medium text-slate-800">' + highlighted + '</div>' +
+                    '<div class="text-xs text-slate-400">' + match.brand + '</div>' +
+                    '</div>';
+            }
+            container.innerHTML = html;
+            container.style.display = 'block';
+
+            // Add click handlers
+            var items = container.querySelectorAll('.suggestion-item');
+            for (var k = 0; k < items.length; k++) {
+                items[k].onclick = function() {
+                    selectSuggestion(this.getAttribute('data-name'));
+                };
+            }
+        }
+
+        function highlightMatch(text, query) {
+            // Highlight kata per kata yang diketikkan user
+            var terms = query.toLowerCase().split(/[\s\-]+/).filter(function(t) { return t.length > 0; });
+            var result = text;
+            
+            for(var i=0; i<terms.length; i++) {
+                var safeQuery = terms[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                var regex = new RegExp('(' + safeQuery + ')', 'gi');
+                result = result.replace(regex, '<strong class="bg-yellow-200 text-blue-800">$1</strong>');
+            }
+            
+            // Highlight juga gabungan katanya (misal ketik "TP LINK", kita highlight "TPLINK" jika ada)
+            var combined = terms.join('');
+            if (combined.length > 0) {
+                var safeCombined = combined.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                var regexComb = new RegExp('(' + safeCombined + ')', 'gi');
+                result = result.replace(regexComb, '<strong class="bg-yellow-200 text-blue-800">$1</strong>');
+            }
+            return result;
+        }
+
+        function selectSuggestion(name) {
+            document.getElementById('search-query').value = name;
+            document.getElementById('search-suggestions').style.display = 'none';
+        }
+
+        // ========================================================================
+        // TOAST
+        // ========================================================================
+        function showToast(type, title, msg) {
+            var c = document.getElementById('toast-container');
+            var icons = {
+                success: 'fa-check-circle text-emerald-500',
+                error: 'fa-circle-xmark text-red-500',
+                info: 'fa-circle-info text-blue-500',
+                warning: 'fa-triangle-exclamation text-amber-500'
+            };
+            var bg = {
+                success: 'bg-emerald-50 border-emerald-200',
+                error: 'bg-red-50 border-red-200',
+                info: 'bg-blue-50 border-blue-200',
+                warning: 'bg-amber-50 border-amber-200'
+            };
+            var t = document.createElement('div');
+            t.className = 'bg-white rounded-xl p-4 flex items-start gap-3 shadow-lg toast-in border ' + bg[type];
+            t.innerHTML = '<i class="fa-solid ' + icons[type] + ' text-xl mt-0.5"></i>' +
+                '<div class="flex-1"><div class="font-bold text-slate-800 text-sm">' + title + '</div>' +
+                '<div class="text-xs text-slate-600 mt-1">' + msg + '</div></div>' +
+                '<button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-times"></i></button>';
+            c.appendChild(t);
+            setTimeout(function() { t.remove(); }, 5000);
+        }
+
+        // ========================================================================
+        // TF-IDF (char_wb, n-gram 2-3)
+        // ========================================================================
+        function charWbNgrams(text, n) {
+            var clean = ' ' + cleanText(text) + ' ';
+            var ngrams = [];
+            for (var i = 0; i <= clean.length - n; i++) {
+                ngrams.push(clean.substring(i, i + n));
+            }
+            return ngrams;
+        }
+
+        function calculateTfIdf(query, target) {
+            var qBigrams = charWbNgrams(query, 2);
+            var qTrigrams = charWbNgrams(query, 3);
+            var tBigrams = charWbNgrams(target, 2);
+            var tTrigrams = charWbNgrams(target, 3);
+
+            var qNgrams = qBigrams.concat(qTrigrams);
+            var tNgrams = tBigrams.concat(tTrigrams);
+
+            if (qNgrams.length === 0 || tNgrams.length === 0) return 0;
+
+            var qFreq = {}, tFreq = {};
+            for (var i = 0; i < qNgrams.length; i++) { qFreq[qNgrams[i]] = (qFreq[qNgrams[i]] || 0) + 1; }
+            for (var j = 0; j < tNgrams.length; j++) { tFreq[tNgrams[j]] = (tFreq[tNgrams[j]] || 0) + 1; }
+
+            var dot = 0, qNorm = 0, tNorm = 0;
+            for (var k in qFreq) {
+                dot += (qFreq[k] || 0) * (tFreq[k] || 0);
+                qNorm += Math.pow(qFreq[k] || 0, 2);
+            }
+            for (var m in tFreq) {
+                tNorm += Math.pow(tFreq[m] || 0, 2);
+            }
+
+            return qNorm && tNorm ? dot / (Math.sqrt(qNorm) * Math.sqrt(tNorm)) : 0;
+        }
+
+        // ========================================================================
+        // SBERT Simulation
+        // ========================================================================
+        function calculateSbert(query, target) {
+            var qClean = cleanText(query).split(/\s+/);
+            var tClean = cleanText(target).split(/\s+/);
+
+            var brands_list = ['logitech', 'sandisk', 'tp-link', 'samsung', 'wd', 'v-gen', 'lexar', 'kingston', 'asus', 'msi', 'xiaomi', 'apc'];
+            var qBrand = null, tBrand = null;
+
+            for (var i = 0; i < brands_list.length; i++) {
+                for (var j = 0; j < qClean.length; j++) {
+                    if (qClean[j].indexOf(brands_list[i]) !== -1) { qBrand = brands_list[i]; break; }
+                }
+                for (var k = 0; k < tClean.length; k++) {
+                    if (tClean[k].indexOf(brands_list[i]) !== -1) { tBrand = brands_list[i]; break; }
+                }
+                if (qBrand && tBrand) break;
+            }
+
+            var score = 0;
+            if (qBrand && tBrand && qBrand === tBrand) score += 0.3;
+
+            var qNums = [], tNums = [];
+            for (var a = 0; a < qClean.length; a++) { if (/\d+/.test(qClean[a])) qNums.push(qClean[a]); }
+            for (var b = 0; b < tClean.length; b++) { if (/\d+/.test(tClean[b])) tNums.push(tClean[b]); }
+
+            if (qNums.length > 0) {
+                var matches = 0;
+                for (var c = 0; c < qNums.length; c++) {
+                    for (var d = 0; d < tNums.length; d++) {
+                        if (tNums[d].indexOf(qNums[c]) !== -1 || qNums[c].indexOf(tNums[d]) !== -1) { matches++; break; }
+                    }
+                }
+                score += (matches / qNums.length) * 0.3;
+            }
+
+            var qSet = {}, tSet = {};
+            for (var e = 0; e < qClean.length; e++) { if (qClean[e].length > 2) qSet[qClean[e]] = true; }
+            for (var f = 0; f < tClean.length; f++) { if (tClean[f].length > 2) tSet[tClean[f]] = true; }
+
+            var inter = 0;
+            for (var w in qSet) { if (tSet[w]) inter++; }
+            var union = Object.keys(qSet).length + Object.keys(tSet).length - inter;
+            var jaccard = union > 0 ? inter / union : 0;
+            score += jaccard * 0.4;
+
+            return Math.min(1, Math.max(0, score));
+        }
+
+        // ========================================================================
+        // HYBRID (PARALEL)
+        // ========================================================================
+        function calculateHybrid(query, target) {
+            // Function ini masih ada, namun perhitungan individual dipisah saat render table
+            return (calculateTfIdf(query, target) + calculateSbert(query, target)) / 2;
+        }
+
+        // ========================================================================
+        // SEARCH
+        // ========================================================================
+        async function performSearch() {
+            var query = document.getElementById('search-query').value.trim();
+            var threshold = parseFloat(document.getElementById('threshold-slider').value);
+
+            if (!query) {
+                showToast('error', 'Input Required', 'Mohon ketik nama produk!');
+                return;
+            }
+
+            var checkedStores = [];
+            document.querySelectorAll('.store-chk:checked').forEach(function(c) {
+                checkedStores.push(c.value);
+            });
+            if (checkedStores.length === 0) {
+                showToast('error', 'Filter Required', 'Pilih minimal 1 toko!');
+                return;
+            }
+
+            document.getElementById('results-body').innerHTML = '<tr><td colspan="6" class="p-20 text-center"><div class="spinner w-12 h-12 mx-auto mb-4"></div><p class="font-bold text-slate-600">Menghitung Kemiripan...</p></td></tr>';
+
+            await new Promise(function(r) { setTimeout(r, 100); });
+
+            // INTEGRASI API ONLINE DENGAN FALLBACK
+            if (apiOnline) {
+                try {
+                    var response = await fetch(apiUrl + '/api/match/?query=' + encodeURIComponent(query) + '&threshold=' + threshold + '&stores=' + encodeURIComponent(checkedStores.join(',')));
+                    var data = await response.json();
+                    if (response.ok && data.data) {
+                        searchResults = data.data.map(function(r) {
+                            return {
+                                data: {
+                                    id: r.id,
+                                    nama: r.nama_produk,
+                                    toko: r.nama_toko,
+                                    harga: r.harga,
+                                    terjual: r.terjual_bln,
+                                    tanggal: r.tanggal,
+                                    brand: r.brand || 'UNKNOWN',
+                                    clean_nama: cleanText(r.nama_produk)
+                                },
+                                tfidf: r.skor_tfidf,
+                                sbert: r.skor_sbert,
+                                hybrid: r.skor_akhir
+                            };
+                        });
+                        
+                        renderResults(searchResults);
+                        showToast('success', 'Search Complete', 'Ditemukan ' + searchResults.length + ' produk dari ' + checkedStores.length + ' toko (API)');
+                        return;
+                    }
+                } catch (e) {
+                    console.log('Error fetching search results from API:', e);
+                    showToast('warning', 'API Error', 'Gagal memanggil API, beralih ke simulasi offline.');
+                }
+            }
+
+            var queryClean = cleanText(query);
+            var queryBrand = '';
+            if (productMap[query]) {
+                queryBrand = productMap[query].brand;
+            }
+
+            var resultsMap = {}; 
+
+            for (var i = 0; i < competitorProducts.length; i++) {
+                var p = competitorProducts[i];
+
+                if (checkedStores.indexOf(p.toko) === -1) continue;
+
+                // Hitung skor komponen individual
+                var tfidfScore = calculateTfIdf(queryClean, p.clean_nama);
+                var sbertScore = calculateSbert(queryClean, p.clean_nama);
+                var hybrid = (tfidfScore + sbertScore) / 2;
+
+                if (hybrid >= threshold) {
+                    var key = p.toko;
+                    if (!resultsMap[key] || hybrid > resultsMap[key].hybrid) {
+                        resultsMap[key] = {
+                            data: p,
+                            tfidf: tfidfScore,
+                            sbert: sbertScore,
+                            hybrid: hybrid
+                        };
+                    }
+                }
+            }
+
+            var results = [];
+            for (var key in resultsMap) {
+                results.push(resultsMap[key]);
+            }
+            results.sort(function(a, b) { return b.hybrid - a.hybrid; });
+
+            searchResults = results;
+            renderResults(results);
+
+            showToast('success', 'Search Complete', 'Ditemukan ' + results.length + ' produk dari ' + checkedStores.length + ' toko (Simulasi)');
+
+        }
+
+        function renderResults(results) {
+            var tbody = document.getElementById('results-body');
+
+            if (results.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="p-20 text-center text-slate-400"><i class="fa-solid fa-ghost text-5xl mb-3 opacity-30"></i><p class="font-bold">Tidak ada hasil</p></td></tr>';
+                document.getElementById('match-count').textContent = '0 produk';
+                return;
+            }
+
+            var html = '';
+            for (var i = 0; i < results.length; i++) {
+                var r = results[i];
+                var d = r.data;
+
+                html += '<tr class="hover-row">' +
+                    '<td class="p-4 text-center"><input type="checkbox" value="' + i + '" class="result-chk rounded" onchange="updateSelected()"></td>' +
+                    '<td class="p-4"><div class="font-bold text-slate-800">' + d.nama + '</div><div class="text-[10px] text-slate-400 mt-1">' + d.brand + '</div></td>' +
+                    '<td class="p-4"><span class="text-blue-500 font-bold text-xs">' + d.toko + '</span></td>' +
+                    '<td class="p-4 text-right font-bold text-slate-800">Rp ' + d.harga.toLocaleString('id-ID') + '</td>' +
+                    '<td class="p-4 text-right text-slate-600">' + d.terjual + '</td>' +
+                    '<td class="p-4 w-48">' +
+                    '<div class="flex justify-between text-[10px] mb-0.5 text-slate-500"><span>TF-IDF:</span><span>' + Math.round(r.tfidf * 100) + '%</span></div>' +
+                    '<div class="flex justify-between text-[10px] mb-1.5 text-slate-500"><span>SBERT:</span><span>' + Math.round(r.sbert * 100) + '%</span></div>' +
+                    '<div class="flex justify-between text-[11px] mb-1"><span>Skor Hybrid:</span><span class="text-blue-500 font-bold">' + Math.round(r.hybrid * 100) + '%</span></div>' +
+                    '<div class="w-full bg-slate-200 h-1.5 rounded-full"><div class="h-1.5 bg-gradient-to-r from-blue-500 to-purple-500 rounded-full" style="width:' + (r.hybrid * 100) + '%"></div></div>' +
+                    '</td></tr>';
+            }
+
+            tbody.innerHTML = html;
+            document.getElementById('match-count').textContent = results.length + ' produk';
+        }
+
+        function toggleAll(cb) {
+            document.querySelectorAll('.result-chk').forEach(function(c) { c.checked = cb.checked; });
+            updateSelected();
+        }
+
+        function updateSelected() {
+            var checked = document.querySelectorAll('.result-chk:checked');
+            selectedForAnalysis = [];
+            for (var i = 0; i < checked.length; i++) {
+                selectedForAnalysis.push(searchResults[parseInt(checked[i].value)]);
+            }
+            var btn = document.getElementById('analyze-btn');
+            btn.disabled = selectedForAnalysis.length === 0;
+            btn.innerHTML = '<i class="fa-solid fa-chart-line"></i>Analisis (' + selectedForAnalysis.length + ')';
+        }
+
+        function analyzeSelected() {
+            if (selectedForAnalysis.length === 0) return;
+            switchTab('analisis');
+            renderAnalysis();
+            showToast('success', 'Analysis Ready', 'Menganalisis ' + selectedForAnalysis.length + ' produk');
+        }
+
+        function resetAnalysis() {
+            selectedForAnalysis = [];
+            document.querySelectorAll('.result-chk').forEach(function(c) { c.checked = false; });
+            document.getElementById('select-all').checked = false;
+            updateSelected();
+            document.getElementById('selected-products').innerHTML = '';
+            if (priceChart) priceChart.destroy();
+            if (salesChart) salesChart.destroy();
+            document.getElementById('history-table').innerHTML = '';
+            document.getElementById('history-count').textContent = '0 record';
+        }
+
+        function renderAnalysis() {
+            var list = document.getElementById('selected-products');
+            var html = '';
+            
+            // Map ini akan menyimpan nama produk & toko yang PERSIS dari hasil matching
+            var selectedMap = {};
+            
+            for (var i = 0; i < selectedForAnalysis.length; i++) {
+                var p = selectedForAnalysis[i].data;
+                var shortName = p.nama.length > 40 ? p.nama.substring(0, 40) + '...' : p.nama;
+                html += '<span class="px-3 py-1 bg-blue-100 text-blue-600 border border-blue-200 rounded-full text-xs font-bold">' + p.toko + ': ' + shortName + '</span>';
+                
+                // Tandai record yang valid (Toko + Nama asli)
+                selectedMap[p.toko + '|' + p.nama] = true;
+            }
+            list.innerHTML = html;
+
+            var records = [];
+            var seen = {};
+
+            // Mengambil history hanya untuk produk yang persis dengan yang dicentang
+            for (var i = 0; i < fullHistoryData.length; i++) {
+                var d = fullHistoryData[i];
+
+                // Cukup cek apakah data histori ini milik toko & nama produk yang kita centang
+                if (selectedMap[d.toko + '|' + d.nama]) {
+                    
+                    // Deduplikasi hanya berdasarkan tanggal (jika di hari yg sama produk discrape 2x, ambil 1 saja)
+                    var key = d.tanggal + '|' + d.toko + '|' + d.nama;
+                    if (!seen[key]) {
+                        seen[key] = true;
+                        records.push(d);
+                    }
+                }
+            }
+
+            records.sort(function(a, b) {
+                var dateCompare = a.tanggal.localeCompare(b.tanggal);
+                if (dateCompare !== 0) return dateCompare;
+                return a.toko.localeCompare(b.toko);
+            });
+
+            document.getElementById('history-count').textContent = records.length + ' record';
+
+            var tableHtml = '';
+            for (var n = 0; n < records.length; n++) {
+                var r = records[n];
+                var shortName = r.nama.length > 50 ? r.nama.substring(0, 50) + '...' : r.nama;
+                tableHtml += '<tr class="hover-row">' +
+                    '<td class="p-3 font-mono text-slate-500">' + r.tanggal + '</td>' +
+                    '<td class="p-3 text-slate-800">' + shortName + '</td>' +
+                    '<td class="p-3 text-blue-500 font-bold">' + r.toko + '</td>' +
+                    '<td class="p-3 text-right font-bold text-slate-800">Rp ' + r.harga.toLocaleString('id-ID') + '</td>' +
+                    '<td class="p-3 text-right text-slate-600">' + r.terjual + '</td>' +
+                    '</tr>';
+            }
+            document.getElementById('history-table').innerHTML = tableHtml;
+
+            var dates = [...new Set(records.map(function(r) { return r.tanggal; }))].sort();
+            var allStores = [...new Set(records.map(function(r) { return r.toko; }))];
+
+            var storeColors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#ec4899', '#84cc16'];
+
+            if (priceChart) priceChart.destroy();
+            var ctx1 = document.getElementById('priceChart');
+            priceChart = new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: allStores.map(function(store, idx) {
+                        return {
+                            label: store,
+                            data: dates.map(function(d) {
+                                var rec = records.find(function(r) { return r.toko === store && r.tanggal === d; });
+                                return rec ? rec.harga : null;
+                            }),
+                            borderColor: storeColors[idx % storeColors.length],
+                            backgroundColor: storeColors[idx % storeColors.length] + '20',
+                            tension: 0.3,
+                            fill: false
+                        };
+                    })
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 12 } } },
+                    scales: { y: { beginAtZero: false } }
+                }
+            });
+
+            if (salesChart) salesChart.destroy();
+            var ctx2 = document.getElementById('salesChart');
+            salesChart = new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: allStores.map(function(store, idx) {
+                        return {
+                            label: store,
+                            data: dates.map(function(d) {
+                                var rec = records.find(function(r) { return r.toko === store && r.tanggal === d; });
+                                return rec ? rec.terjual : null;
+                            }),
+                            borderColor: storeColors[idx % storeColors.length],
+                            backgroundColor: storeColors[idx % storeColors.length] + '20',
+                            tension: 0.3,
+                            fill: false
+                        };
+                    })
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 12 } } },
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+        }
+
+        // ========================================================================
+        // INIT
+        // ========================================================================
+        async function init() {
+            if (isInitialized || initInProgress) return;
+            initInProgress = true;
+
+            try {
+                var loaded = await loadData();
+                if (!loaded) {
+                    throw new Error('Failed to load data');
+                }
+
+                initAutocomplete();
+
+                var container = document.getElementById('stores-container');
+                var html = '';
+                var competitorStores = stores.filter(function(s) { return s !== 'DB KLIK'; });
+                for (var j = 0; j < competitorStores.length; j++) {
+                    html += '<label class="flex items-center gap-2 text-xs bg-slate-100 hover:bg-slate-200 p-2 rounded-lg cursor-pointer">' +
+                        '<input type="checkbox" checked value="' + competitorStores[j] + '" class="store-chk rounded">' +
+                        '<span class="text-slate-700">' + competitorStores[j] + '</span></label>';
+                }
+                container.innerHTML = html;
+
+                var filter = document.getElementById('filter-store');
+                html = '<option value="">Semua Toko</option>';
+                for (var k = 0; k < stores.length; k++) {
+                    html += '<option value="' + stores[k] + '">' + stores[k] + '</option>';
+                }
+                filter.innerHTML = html;
+
+                var competitorCount = competitorStores.length;
+                document.getElementById('db-count').textContent = competitorProducts.length.toLocaleString('id-ID');
+                document.getElementById('db-total').textContent = competitorProducts.length.toLocaleString('id-ID');
+                document.getElementById('db-stores').textContent = competitorCount;
+
+                var allDates = fullHistoryData.map(function(d) { return d.tanggal; }).sort();
+                if (allDates.length > 0) {
+                    document.getElementById('filter-date-start').value = allDates[0];
+                    document.getElementById('filter-date-end').value = allDates[allDates.length - 1];
+                }
+
+                filteredData = fullHistoryData;
+                renderDataTable();
+                renderDashboard();
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('app').classList.remove('opacity-0');
+
+                var searchInput = document.getElementById('search-query');
+                var searchContainer = document.getElementById('search-suggestions');
+
+                document.addEventListener('click', function(e) {
+                    if (!searchInput.contains(e.target) && !searchContainer.contains(e.target)) {
+                        searchContainer.style.display = 'none';
+                    }
+                });
+
+                searchInput.addEventListener('input', function(e) {
+                    showSuggestions(e.target.value);
+                });
+
+                searchInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        performSearch();
+                        searchContainer.style.display = 'none'; // Tambahan agar box suggestion hilang saat enter ditekan
+                    }
+                });
+
+                isInitialized = true;
+                initInProgress = false;
+
+                // Cek status koneksi API di background
+                checkApiHealth();
+
+                showToast('success', 'Data Loaded', competitorProducts.length.toLocaleString('id-ID') + ' produk dari ' + competitorCount + ' toko');
+
+            } catch (e) {
+                console.error('Init error:', e);
+                initInProgress = false;
+                document.getElementById('loading').innerHTML = '<div class="text-center"><i class="fa-solid fa-circle-exclamation text-red-500 text-5xl mb-4"></i><p class="text-red-600 font-bold text-lg mb-2">Error Memuat Data</p><p class="text-slate-600 text-sm">' + e.message + '</p><button onclick="location.reload()" class="mt-4 px-6 py-2 bg-blue-500 text-white rounded-xl font-bold">Muat Ulang</button></div>';
+            }
+        }
+
+        // ========================================================================
+        // DATA TABLE
+        // ========================================================================
+        function renderDataTable() {
+            var storeFilter = document.getElementById('filter-store').value;
+            var dateStart = document.getElementById('filter-date-start').value;
+            var dateEnd = document.getElementById('filter-date-end').value;
+
+            filteredData = fullHistoryData.filter(function(d) {
+                if (storeFilter && d.toko !== storeFilter) return false;
+                if (dateStart && d.tanggal < dateStart) return false;
+                if (dateEnd && d.tanggal > dateEnd) return false;
+                return true;
+            });
+
+            dataPage = 1;
+            renderDataPage();
+        }
+
+        function renderDataPage() {
+            var tbody = document.getElementById('data-table');
+            var totalPages = Math.ceil(filteredData.length / dataPerPage);
+            if (totalPages === 0) totalPages = 1;
+            if (dataPage > totalPages) dataPage = totalPages;
+
+            var start = (dataPage - 1) * dataPerPage;
+            var end = Math.min(start + dataPerPage, filteredData.length);
+            var pageData = filteredData.slice(start, end);
+
+            var html = '';
+            for (var i = 0; i < pageData.length; i++) {
+                var d = pageData[i];
+                var shortName = d.nama.length > 60 ? d.nama.substring(0, 60) + '...' : d.nama;
+                html += '<tr class="hover-row">' +
+                    '<td class="p-3 font-mono text-slate-500">' + d.tanggal + '</td>' +
+                    '<td class="p-3 text-blue-500 font-bold">' + d.toko + '</td>' +
+                    '<td class="p-3 text-slate-800">' + shortName + '</td>' +
+                    '<td class="p-3 text-slate-500">' + d.brand + '</td>' +
+                    '<td class="p-3 text-right font-bold text-slate-800">Rp ' + d.harga.toLocaleString('id-ID') + '</td>' +
+                    '<td class="p-3 text-right text-slate-600">' + d.terjual + '</td>' +
+                    '</tr>';
+            }
+            tbody.innerHTML = html;
+
+            document.getElementById('data-showing').textContent = filteredData.length > 0 ? (start + 1) + '-' + end : '0-0';
+            document.getElementById('data-total').textContent = filteredData.length;
+            lastPage = totalPages;
+
+            renderPageNumbers();
+
+            document.getElementById('btn-prev').disabled = dataPage <= 1;
+            document.getElementById('btn-next').disabled = dataPage >= totalPages;
+            document.getElementById('btn-last').disabled = dataPage >= totalPages;
+            document.querySelector('#pagination-controls button:first-child').disabled = dataPage <= 1;
+        }
+
+        function renderPageNumbers() {
+            var totalPages = Math.ceil(filteredData.length / dataPerPage);
+            var container = document.getElementById('page-numbers');
+            var html = '';
+
+            var start = Math.max(1, dataPage - 2);
+            var end = Math.min(totalPages, dataPage + 2);
+
+            if (start > 1) {
+                html += '<button onclick="goToPage(1)" class="px-3 py-1 bg-white border border-slate-200 text-slate-700 text-xs rounded-lg hover:bg-slate-100">1</button>';
+                if (start > 2) html += '<span class="px-2 text-slate-400">...</span>';
+            }
+
+            for (var i = start; i <= end; i++) {
+                html += '<button onclick="goToPage(' + i + ')" class="px-3 py-1 text-xs rounded-lg ' + (i === dataPage ? 'bg-blue-500 text-white border border-blue-500' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100') + '">' + i + '</button>';
+            }
+
+            if (end < totalPages) {
+                if (end < totalPages - 1) html += '<span class="px-2 text-slate-400">...</span>';
+                html += '<button onclick="goToPage(' + totalPages + ')" class="px-3 py-1 bg-white border border-slate-200 text-slate-700 text-xs rounded-lg hover:bg-slate-100">' + totalPages + '</button>';
+            }
+
+            container.innerHTML = html;
+        }
+
+        function goToPage(page) {
+            var totalPages = Math.ceil(filteredData.length / dataPerPage);
+            if (page < 1) page = 1;
+            if (page > totalPages) page = totalPages;
+            dataPage = page;
+            renderDataPage();
+        }
+
+        function prevPage() { goToPage(dataPage - 1); }
+        function nextPage() { goToPage(dataPage + 1); }
+
+        function changePerPage() {
+            dataPerPage = parseInt(document.getElementById('per-page').value);
+            dataPage = 1;
+            renderDataPage();
+        }
+
+        function clearDataFilters() {
+            document.getElementById('filter-store').value = '';
+            document.getElementById('filter-date-start').value = '';
+            document.getElementById('filter-date-end').value = '';
+            renderDataTable();
+        }
+
+        // ========================================================================
+        // DASHBOARD
+        // ========================================================================
+        function renderDashboard() {
+            var competitorStores = stores.filter(function(s) { return s !== 'DB KLIK' });
+
+            document.getElementById('db-stores').textContent = competitorStores.length;
+            document.getElementById('db-ready').textContent = Math.round(competitorProducts.length * 0.85).toLocaleString('id-ID');
+            document.getElementById('db-habis').textContent = Math.round(competitorProducts.length * 0.15).toLocaleString('id-ID');
+
+            var storeCounts = {};
+            for (var i = 0; i < competitorProducts.length; i++) {
+                var toko = competitorProducts[i].toko;
+                storeCounts[toko] = (storeCounts[toko] || 0) + 1;
+            }
+
+            if (readyChart) readyChart.destroy();
+            var ctxReady = document.getElementById('readyChart');
+            var sortedStores = competitorStores.sort();
+            readyChart = new Chart(ctxReady, {
+                type: 'bar',
+                data: {
+                    labels: sortedStores,
+                    datasets: [{
+                        label: 'Produk',
+                        data: sortedStores.map(function(s) { return storeCounts[s] || 0; }),
+                        backgroundColor: '#10b981'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true } },
+                    indexAxis: 'y'
+                }
+            });
+
+            if (brandChart) brandChart.destroy();
+            var ctxBrand = document.getElementById('brandChart');
+            var brandCounts = {};
+            for (var i = 0; i < competitorProducts.length; i++) {
+                var brand = competitorProducts[i].brand;
+                brandCounts[brand] = (brandCounts[brand] || 0) + 1;
+            }
+            var topBrands = Object.entries(brandCounts).sort(function(a, b) { return b[1] - a[1]; }).slice(0, 10);
+            var brandColors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#14b8a6'];
+            brandChart = new Chart(ctxBrand, {
+                type: 'doughnut',
+                data: {
+                    labels: topBrands.map(function(b) { return b[0]; }),
+                    datasets: [{
+                        data: topBrands.map(function(b) { return b[1]; }),
+                        backgroundColor: brandColors
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: true, position: 'bottom' } }
+                }
+            });
+
+            if (priceDistChart) priceDistChart.destroy();
+            var ctxPrice = document.getElementById('priceDistChart');
+            var priceRanges = {
+                '< 100K': 0,
+                '100K - 500K': 0,
+                '500K - 1JT': 0,
+                '1JT - 5JT': 0,
+                '> 5JT': 0
+            };
+            for (var i = 0; i < competitorProducts.length; i++) {
+                var price = competitorProducts[i].harga;
+                if (price < 100000) priceRanges['< 100K']++;
+                else if (price < 500000) priceRanges['100K - 500K']++;
+                else if (price < 1000000) priceRanges['500K - 1JT']++;
+                else if (price < 5000000) priceRanges['1JT - 5JT']++;
+                else priceRanges['> 5JT']++;
+            }
+            priceDistChart = new Chart(ctxPrice, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(priceRanges),
+                    datasets: [{
+                        label: 'Jumlah Produk',
+                        data: Object.values(priceRanges),
+                        backgroundColor: '#8b5cf6'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+        }
+
+        // ========================================================================
+        // TABS
+        // ========================================================================
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
+            var targetTab = document.getElementById('view-' + tabId);
+            targetTab.classList.add('active');
+
+            document.querySelectorAll('.nav-btn').forEach(function(btn) {
+                btn.className = 'nav-btn w-full text-left p-3 rounded-xl hover:bg-slate-100 text-slate-600 flex items-center gap-3';
+            });
+
+            var active = document.getElementById('nav-' + tabId);
+            if (active) {
+                if (tabId === 'matching') {
+                    active.className = 'nav-btn w-full text-left p-3 rounded-xl bg-blue-600 text-white shadow-sm flex items-center justify-between';
+                } else {
+                    active.className = 'nav-btn w-full text-left p-3 rounded-xl bg-slate-100 text-slate-800 shadow-sm flex items-center gap-3';
+                }
+            }
+
+            if (tabId === 'dashboard') {
+                setTimeout(function() { renderDashboard(); }, 100);
+            }
+            if (tabId === 'analisis' && selectedForAnalysis.length > 0) {
+                setTimeout(function() { renderAnalysis(); }, 100);
+            }
+        }
+
+        // ========================================================================
+        // EXPORT
+        // ========================================================================
+        function exportResults() {
+            if (searchResults.length === 0) {
+                showToast('warning', 'No Data', 'Tidak ada hasil');
+                return;
+            }
+            var csv = 'Nama,Toko,Harga,Terjual,Tanggal,Brand,Hybrid\n';
+            for (var i = 0; i < searchResults.length; i++) {
+                var r = searchResults[i];
+                var d = r.data;
+                csv += '"' + d.nama + '","' + d.toko + '",' + d.harga + ',' + d.terjual + ',' + d.tanggal + ',"' + d.brand + '",' + r.hybrid.toFixed(4) + '\n';
+            }
+            var link = document.createElement('a');
+            link.href = 'data:text/csv;charset=utf-8,' + encodeURI(csv);
+            link.download = 'COMPINTEL_Hybrid.csv';
+            link.click();
+            showToast('success', 'Exported', searchResults.length + ' hasil diekspor');
+        }
+
+        // ========================================================================
+        // GLOBAL ERROR HANDLER
+        // ========================================================================
+        window.onerror = function(msg, url, line, col, error) {
+            console.error('Global error:', msg, 'at line', line);
+            if (!isInitialized) {
+                var loading = document.getElementById('loading');
+                if (loading) {
+                    loading.innerHTML = '<div class="text-center"><i class="fa-solid fa-circle-exclamation text-red-500 text-5xl mb-4"></i><p class="text-red-600 font-bold text-lg mb-2">Terjadi Kesalahan</p><p class="text-slate-600 text-sm">Error: ' + msg + '</p><button onclick="location.reload()" class="mt-4 px-6 py-2 bg-blue-500 text-white rounded-xl font-bold">Muat Ulang</button></div>';
+                }
+            }
+            return true;
+        };
+
+        // START
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                if (!isInitialized && !initInProgress) {
+                    init();
+                }
+            });
+        } else {
+            if (!isInitialized && !initInProgress) {
+                init();
+            }
+        }
+    </script>
+</body>
+</html>
