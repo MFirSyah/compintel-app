@@ -595,7 +595,7 @@
         var brandMapping = {};  // Kamus alias -> brand utama
         var knownBrands = [];   // Daftar brand utama yang valid
         var apiOnline = false;
-        var apiUrl = localStorage.getItem('compintel_api_url') || 'http://localhost:8000';
+        var apiUrl = localStorage.getItem('compintel_api_url') || 'https://firmanardiansyah23-compintel-backend.hf.space';
         var selectedFile = null;
 
 
@@ -1121,24 +1121,25 @@
         }
 
         function highlightMatch(text, query) {
-            // Highlight kata per kata yang diketikkan user
+            if (!query) return text;
             var terms = query.toLowerCase().split(/[\s\-]+/).filter(function(t) { return t.length > 0; });
-            var result = text;
+            if (terms.length === 0) return text;
             
-            for(var i=0; i<terms.length; i++) {
-                var safeQuery = terms[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                var regex = new RegExp('(' + safeQuery + ')', 'gi');
-                result = result.replace(regex, '<strong class="bg-yellow-200 text-blue-800">$1</strong>');
-            }
-            
-            // Highlight juga gabungan katanya (misal ketik "TP LINK", kita highlight "TPLINK" jika ada)
             var combined = terms.join('');
-            if (combined.length > 0) {
-                var safeCombined = combined.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                var regexComb = new RegExp('(' + safeCombined + ')', 'gi');
-                result = result.replace(regexComb, '<strong class="bg-yellow-200 text-blue-800">$1</strong>');
-            }
-            return result;
+            var allPatterns = terms.concat(combined ? [combined] : []);
+            allPatterns.sort(function(a, b) { return b.length - a.length; });
+            
+            var uniquePatterns = [];
+            allPatterns.forEach(function(pat) {
+                if (uniquePatterns.indexOf(pat) === -1) uniquePatterns.push(pat);
+            });
+            
+            var escapedPatterns = uniquePatterns.map(function(pat) {
+                return pat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            });
+            
+            var regex = new RegExp('(' + escapedPatterns.join('|') + ')', 'gi');
+            return text.replace(regex, '<strong class="bg-yellow-200 text-blue-800">$1</strong>');
         }
 
         function selectSuggestion(name) {
