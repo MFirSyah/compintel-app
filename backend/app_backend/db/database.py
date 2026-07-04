@@ -2,6 +2,16 @@
 Database connection and session management.
 """
 
+import socket
+
+# Force IPv4 to prevent IPv6 connection timeout issues (common on Windows/certain ISPs)
+original_getaddrinfo = socket.getaddrinfo
+def ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    if family == socket.AF_UNSPEC or family == socket.AF_INET6:
+        family = socket.AF_INET
+    return original_getaddrinfo(host, port, family, type, proto, flags)
+socket.getaddrinfo = ipv4_only_getaddrinfo
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from app_backend.core.config import settings
