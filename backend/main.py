@@ -75,10 +75,17 @@ async def lifespan(app: FastAPI):
     # Create upload directory
     Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
 
-    # Create database tables (if using local DB)
+    # Create database tables (if using DB)
     if "postgresql" in settings.DATABASE_URL:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        try:
+            logger.info("🔄 Connecting to database and verifying tables...")
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("✅ Database connection and tables verified.")
+        except Exception as db_err:
+            logger.error(f"⚠️ Database connection failed on startup: {db_err}")
+            logger.warning("⚠️ App starting in offline-DB mode. DB endpoints will return errors but server remains active.")
+
 
     # Initialize ML models
     import asyncio
