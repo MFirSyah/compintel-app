@@ -80,6 +80,17 @@ def apply_name_rules(product_name: str, kamus: dict) -> tuple:
     # 2. Jika belum teridentifikasi brand-nya, cari apakah ada brand utama yang disebut langsung
     if extracted_brand == "UNKNOWN":
         unique_brands = set(kamus.values())
+        # Tambahkan brand komputer standar lainnya secara otomatis agar terdeteksi
+        additional_brands = {
+            "SANDISK", "ACER", "HP", "DELL", "LENOVO", "ASUS", "MSI", "GIGABYTE", 
+            "LOGITECH", "SAMSUNG", "KINGSTON", "XIAOMI", "LG", "INTEL", "AMD", 
+            "NVIDIA", "RAZER", "FANTECH", "REXUS", "V-GEN", "TP-LINK", "WD", 
+            "ADATA", "SEAGATE", "CORSAIR", "CANON", "EPSON", "BROTHER", "PHILIPS", 
+            "AOC", "VIEWSONIC", "BENQ", "ALCATROZ", "UGREEN", "BASEUS", "JBL", 
+            "SONY", "RUIJIE", "MERCUSYS", "NETGEAR", "DLINK", "CISCO", "HIKVISION", 
+            "SPC", "DAHUA", "EZVIZ"
+        }
+        unique_brands.update(additional_brands)
         sorted_brands = sorted(unique_brands, key=len, reverse=True)
         for brand in sorted_brands:
             pattern = re.compile(r'\b' + re.escape(brand) + r'\b', re.IGNORECASE)
