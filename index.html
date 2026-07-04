@@ -595,7 +595,12 @@
         var brandMapping = {};  // Kamus alias -> brand utama
         var knownBrands = [];   // Daftar brand utama yang valid
         var apiOnline = false;
-        var apiUrl = localStorage.getItem('compintel_api_url') || 'https://firmanardiansyah23-compintel-backend.hf.space';
+        var defaultApiUrl = 'https://firmanardiansyah23-compintel-backend.hf.space';
+        var apiUrl = localStorage.getItem('compintel_api_url');
+        if (!apiUrl || apiUrl === 'http://localhost:8000') {
+            apiUrl = defaultApiUrl;
+            localStorage.setItem('compintel_api_url', defaultApiUrl);
+        }
         var selectedFile = null;
 
 
