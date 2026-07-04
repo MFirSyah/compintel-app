@@ -18,7 +18,7 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, backend_dir)
 
 from app_backend.core.config import settings
-from app_backend.db.database import engine, Base, SessionLocal
+from app_backend.db.database import engine, Base, AsyncSessionLocal
 from app_backend.models.models import DataKompetitor, DataDbKlik, UploadHistory
 from sqlalchemy import insert
 
@@ -204,7 +204,7 @@ async def import_csv_file(file_path: str, kamus: dict):
 
         # Lakukan Bulk Insert menggunakan SQLAlchemy Core (Sangat Cepat!)
         if records_to_insert:
-            async with SessionLocal() as session:
+            async with AsyncSessionLocal() as session:
                 async with session.begin():
                     # Tentukan tabel tujuan
                     if is_db_klik:
