@@ -4,11 +4,6 @@ Sistem Analisis Pencocokan Produk Hybrid (TF-IDF + SBERT)
 """
 import os
 import sys
-# Force local 'app' package to be loaded by clearing sys.modules cache
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-if 'app' in sys.modules:
-    sys.modules.pop('app')
-
 import logging
 
 from contextlib import asynccontextmanager
@@ -28,11 +23,14 @@ import numpy as np
 import csv
 import io
 
-from app.core.config import settings
-from app.db.database import engine, Base, get_db
-from app.models.models import DataKompetitor, DataDbKlik, UploadHistory, ProductEmbedding
-from app.services.tfidf_service import TFIDFMatcher
-from app.services.sbert_service import SBERTMatcher
+# Import from app_backend package
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from app_backend.core.config import settings
+from app_backend.db.database import engine, Base, get_db
+from app_backend.models.models import DataKompetitor, DataDbKlik, UploadHistory, ProductEmbedding
+from app_backend.services.tfidf_service import TFIDFMatcher
+from app_backend.services.sbert_service import SBERTMatcher
+
 
 # Supabase
 try:
