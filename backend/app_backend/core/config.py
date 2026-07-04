@@ -20,7 +20,10 @@ class Settings(BaseSettings):
     # ML Configuration
     TFIDF_ALPHA: float = 0.5  # Weight for TF-IDF in hybrid formula
     TFIDF_THRESHOLD: float = 0.60  # Default threshold
-    SBERT_MODEL: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    
+    # Dynamically check if fine-tuned local model exists in workspace root
+    _local_path: str = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "model_sbert_local"))
+    SBERT_MODEL: str = _local_path if os.path.exists(_local_path) else "paraphrase-multilingual-MiniLM-L12-v2"
 
     # Upload Settings
     MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10MB
