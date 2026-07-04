@@ -2,11 +2,15 @@
 COMPINTEL Backend - FastAPI with Supabase Integration
 Sistem Analisis Pencocokan Produk Hybrid (TF-IDF + SBERT)
 """
-
 import os
+import sys
+# Force current directory to be first in python path to avoid conflicts with HF's internal 'app' package
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+
 from datetime import datetime
 from typing import List, Optional
 
