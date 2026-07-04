@@ -30,7 +30,7 @@ def load_kamus() -> dict:
     """Memuat kamus alias brand dari KAMUS.csv."""
     kamus = {}
     if not os.path.exists(KAMUS_PATH):
-        print(f"⚠️ Warning: File KAMUS.csv tidak ditemukan di {KAMUS_PATH}")
+        print(f"[WARNING] File KAMUS.csv tidak ditemukan di {KAMUS_PATH}")
         return kamus
 
     with open(KAMUS_PATH, mode='r', encoding='utf-8') as f:
@@ -40,7 +40,7 @@ def load_kamus() -> dict:
             brand_utama = row['Brand_Utama'].strip().upper()
             if alias and brand_utama:
                 kamus[alias] = brand_utama
-    print(f"📖 Loaded {len(kamus)} brand aliases dari kamus.")
+    print(f"Loaded {len(kamus)} brand aliases dari kamus.")
     return kamus
 
 def clean_text(text: str) -> str:
@@ -117,7 +117,7 @@ async def import_csv_file(file_path: str, kamus: dict):
     filename = os.path.basename(file_path)
     meta = parse_filename(filename)
     
-    print(f"\n🚀 Memproses File: {filename}")
+    print(f"\nProcessing File: {filename}")
     print(f"   Toko: {meta['nama_toko']} | Status: {meta['status']}")
 
     try:
@@ -131,7 +131,7 @@ async def import_csv_file(file_path: str, kamus: dict):
         required = ['NAMA', 'HARGA', 'TERJUAL/BLN']
         for col in required:
             if col not in df.columns:
-                print(f"   ❌ Skip: Kolom '{col}' tidak ditemukan di {filename}")
+                print(f"   [SKIP] Kolom '{col}' tidak ditemukan di {filename}")
                 return
 
         # Pilihan kolom opsional
@@ -227,12 +227,12 @@ async def import_csv_file(file_path: str, kamus: dict):
                     )
                     session.add(upload_log)
             
-            print(f"   🟢 Sukses: Bulk insert {len(records_to_insert)} baris ke database.")
+            print(f"   [SUCCESS] Bulk insert {len(records_to_insert)} baris ke database.")
         else:
-            print("   ⚠️ Warning: Tidak ada baris valid untuk diinsert.")
+            print("   [WARNING] Tidak ada baris valid untuk diinsert.")
 
     except Exception as e:
-        print(f"   ❌ Gagal memproses {filename}: {e}")
+        print(f"   [FAILED] Gagal memproses {filename}: {e}")
 
 async def main():
     print("=========================================================")
@@ -240,21 +240,21 @@ async def main():
     print("=========================================================")
     
     # 1. Pastikan tabel di database sudah siap
-    print("🔄 Membuat/memastikan tabel database...")
+    print("Membuat/memastikan tabel database...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    print("✅ Struktur tabel siap.")
+    print("Struktur tabel siap.")
 
     # 2. Muat kamus
     kamus = load_kamus()
 
     # 3. Cari seluruh file CSV di folder DATA UTAMA
     if not os.path.exists(DATA_UTAMA_DIR):
-        print(f"❌ Error: Folder DATA UTAMA tidak ditemukan di {DATA_UTAMA_DIR}")
+        print(f"[ERROR] Folder DATA UTAMA tidak ditemukan di {DATA_UTAMA_DIR}")
         return
 
     all_files = [f for f in os.listdir(DATA_UTAMA_DIR) if f.endswith('.csv') and f != "KAMUS.csv"]
-    print(f"📂 Ditemukan {len(all_files)} file CSV rekap toko di {DATA_UTAMA_DIR}")
+    print(f"Ditemukan {len(all_files)} file CSV rekap toko di {DATA_UTAMA_DIR}")
 
     # Urutkan agar DB KLIK diproses pertama
     all_files.sort(key=lambda x: "DB KLIK" not in x)
@@ -265,7 +265,7 @@ async def main():
         await import_csv_file(file_path, kamus)
 
     print("\n=========================================================")
-    print("🎉 SEMUA DATA UTAMA BERHASIL DIIMPOR KE SUPABASE!")
+    print("SEMUA DATA UTAMA BERHASIL DIIMPOR KE SUPABASE!")
     print("=========================================================")
 
 if __name__ == "__main__":
