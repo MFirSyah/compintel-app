@@ -252,11 +252,30 @@ async def main():
     
     # 1. Pastikan tabel di database sudah siap
     print("Membuat/memastikan tabel database...")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        print("Mengosongkan data lama untuk clean install...")
-        await conn.execute(text("TRUNCATE TABLE data_db_klik, data_kompetitor, upload_history RESTART IDENTITY CASCADE;"))
-    print("Struktur tabel siap & data lama telah dikosongkan.")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            print("Mengosongkan data lama untuk clean install...")
+            if "sqlite" in str(conn.engine.url):
+                await conn.execute(text("DELETE FROM data_db_klik;"))
+                await conn.execute(text("DELETE FROM data_kompetitor;"))
+                await conn.execute(text("DELETE FROM upload_history;"))
+                await conn.execute(text("DELETE FROM produk_embeddings;"))
+                try:
+                    await conn.execute(text("DELETE FROM sqlite_sequence;"))
+                except Exception:
+                    pass
+            else:
+                await conn.execute(text("TRUNCATE TABLE data_db_klik, data_kompetitor, upload_history, produk_embeddings RESTART IDENTITY CASCADE;"))
+        print("Struktur tabel siap & data lama telah dikosongkan.")
+    except Exception as db_err:
+        print("\n[ERROR] Gagal menghubungkan ke database!")
+        print(f"Detail error: {db_err}")
+        print("\nTips:")
+        print("1. Pastikan PostgreSQL atau SQLite Anda aktif.")
+        print("2. Jika menggunakan Supabase, pastikan environment variable DATABASE_URL sudah dikonfigurasi dengan benar di file .env")
+        print("3. Buat file .env di folder backend/ dengan menyalin .env.example dan sesuaikan DATABASE_URL-nya.")
+        return
 
     # 2. Muat kamus
     kamus = load_kamus()

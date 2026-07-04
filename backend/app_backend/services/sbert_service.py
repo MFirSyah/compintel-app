@@ -51,11 +51,10 @@ class SBERTMatcher:
             logger.error(f"❌ Encoding failed: {e}")
             return None
 
-    def get_embeddings_batch(self, texts: List[str]) -> np.ndarray:
+    async def get_embeddings_batch(self, texts: List[str], db) -> np.ndarray:
         """
         Get SBERT embeddings for a list of texts.
-        Uses in-memory cache for texts already encoded.
-        Encodes missing texts in batch.
+        Uses in-memory cache, then DB table 'produk_embeddings', and encodes the rest.
         """
         if self.model is None:
             # Return zero vectors if SBERT is not available
@@ -65,6 +64,7 @@ class SBERTMatcher:
         missing_texts = []
         missing_indices = []
 
+        # 1. Check in-memory cache
         for idx, text in enumerate(texts):
             clean_text = text.strip()
             if clean_text in self.embeddings_cache:
@@ -73,24 +73,90 @@ class SBERTMatcher:
                 missing_texts.append(clean_text)
                 missing_indices.append(idx)
 
-        if missing_texts:
+        if not missing_texts:
+            return np.array(embeddings, dtype=np.float32)
+
+        # 2. Check Database for missing texts (batch select)
+        from app_backend.models.models import ProductEmbedding
+        from sqlalchemy import select, insert
+        
+        db_found = {}
+        try:
+            chunk_size = 1000
+            for i in range(0, len(missing_texts), chunk_size):
+                chunk = missing_texts[i:i+chunk_size]
+                stmt = select(ProductEmbedding).where(ProductEmbedding.nama_produk.in_(chunk))
+                res = await db.execute(stmt)
+                db_rows = res.scalars().all()
+                for row in db_rows:
+                    if row.embedding_sbert:
+                        emb_vec = np.array([float(x) for x in row.embedding_sbert.split(',')], dtype=np.float32)
+                        db_found[row.nama_produk] = emb_vec
+        except Exception as db_err:
+            logger.warning(f"Database SBERT embeddings lookup failed: {db_err}")
+
+        # Update based on DB search
+        still_missing_texts = []
+        still_missing_indices = []
+
+        for clean_text, orig_idx in zip(missing_texts, missing_indices):
+            if clean_text in db_found:
+                emb_vec = db_found[clean_text]
+                self.embeddings_cache[clean_text] = emb_vec
+                embeddings[orig_idx] = emb_vec
+            else:
+                still_missing_texts.append(clean_text)
+                still_missing_indices.append(orig_idx)
+
+        # 3. Encode still missing texts and save to DB
+        if still_missing_texts:
             try:
-                logger.info(f"Encoding {len(missing_texts)} missing SBERT embeddings...")
-                encoded = self.model.encode(missing_texts, batch_size=256, show_progress_bar=False, convert_to_numpy=True)
-                for i, clean_text in enumerate(missing_texts):
-                    self.embeddings_cache[clean_text] = encoded[i]
+                unique_missing = list(set(still_missing_texts))
+                logger.info(f"Encoding {len(unique_missing)} missing SBERT embeddings...")
+                encoded = self.model.encode(unique_missing, batch_size=256, show_progress_bar=False, convert_to_numpy=True)
                 
-                # Place back into list
-                for i, idx in enumerate(missing_indices):
-                    embeddings[idx] = encoded[i]
+                encoded_map = {txt: vec for txt, vec in zip(unique_missing, encoded)}
+                
+                for clean_text, orig_idx in zip(still_missing_texts, still_missing_indices):
+                    emb_vec = encoded_map[clean_text]
+                    self.embeddings_cache[clean_text] = emb_vec
+                    embeddings[orig_idx] = emb_vec
+
+                # Save new embeddings to DB
+                records_to_insert = []
+                for txt in unique_missing:
+                    vec = encoded_map[txt]
+                    serialized = ",".join(map(str, vec.tolist()))
+                    records_to_insert.append({
+                        "nama_produk": txt,
+                        "embedding_sbert": serialized
+                    })
+
+                insert_chunk_size = 500
+                for i in range(0, len(records_to_insert), insert_chunk_size):
+                    chunk = records_to_insert[i:i+insert_chunk_size]
+                    try:
+                        await db.execute(insert(ProductEmbedding), chunk)
+                        await db.commit()
+                    except Exception as ins_err:
+                        await db.rollback()
+                        logger.warning(f"Error saving SBERT embeddings to DB: {ins_err}")
+                        # Fallback one by one
+                        for rec in chunk:
+                            try:
+                                await db.execute(insert(ProductEmbedding).values(rec))
+                                await db.commit()
+                            except Exception:
+                                await db.rollback()
             except Exception as e:
-                logger.error(f"Batch encoding failed: {e}")
-                # Fallback to zero vectors for missing
+                logger.error(f"Batch SBERT encoding or DB cache failed: {e}")
                 zero_vec = np.zeros(384, dtype=np.float32)
-                for idx in missing_indices:
-                    embeddings[idx] = zero_vec
+                for idx in still_missing_indices:
+                    if embeddings[idx] is None:
+                        embeddings[idx] = zero_vec
 
         return np.array(embeddings, dtype=np.float32)
+
 
     def get_similarity(self, text1: str, text2: str) -> float:
         """

@@ -103,9 +103,84 @@ async def lifespan(app: FastAPI):
         await engine.dispose()
 
 
+# Brand normalization global dict
+brand_map = {}
+
+def load_kamus():
+    """Load brand alias mapping from app_backend/data/KAMUS.csv."""
+    global brand_map
+    import csv
+    import re
+    kamus_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_backend", "data", "KAMUS.csv")
+    if not os.path.exists(kamus_path):
+        logger.warning(f"⚠️ KAMUS.csv not found at {kamus_path}")
+        return
+        
+    try:
+        with open(kamus_path, mode='r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                alias = row.get('Alias', '').strip().upper()
+                brand_utama = row.get('Brand_Utama', '').strip().upper()
+                if alias and brand_utama:
+                    # Save as regex patterns for word boundary mapping
+                    regex_pattern = r'\b' + re.escape(alias) + r'\b'
+                    brand_map[regex_pattern] = brand_utama
+        logger.info(f"✅ Loaded {len(brand_map)} brand mappings from KAMUS.csv")
+    except Exception as e:
+        logger.error(f"❌ Failed to load KAMUS.csv: {e}")
+
+def apply_name_rules(product_name: str) -> tuple:
+    """
+    Correct product name based on KAMUS.csv and extract normalized brand.
+    Returns (corrected_name, extracted_brand).
+    """
+    if not product_name:
+        return "", "UNKNOWN"
+        
+    import re
+    corrected_name = product_name
+    extracted_brand = "UNKNOWN"
+    
+    # 1. Correct name using alias patterns
+    name_upper = product_name.upper()
+    sorted_aliases = sorted(brand_map.keys(), key=len, reverse=True)
+    
+    for alias_regex in sorted_aliases:
+        brand_utama = brand_map[alias_regex]
+        pattern = re.compile(alias_regex, re.IGNORECASE)
+        if pattern.search(corrected_name):
+            corrected_name = pattern.sub(brand_utama, corrected_name)
+            extracted_brand = brand_utama
+            
+    # 2. If still UNKNOWN, look for direct brand names in name
+    if extracted_brand == "UNKNOWN":
+        unique_brands = set(brand_map.values())
+        additional_brands = {
+            "SANDISK", "ACER", "HP", "DELL", "LENOVO", "ASUS", "MSI", "GIGABYTE", 
+            "LOGITECH", "SAMSUNG", "KINGSTON", "XIAOMI", "LG", "INTEL", "AMD", 
+            "NVIDIA", "RAZER", "FANTECH", "REXUS", "V-GEN", "TP-LINK", "WD", 
+            "ADATA", "SEAGATE", "CORSAIR", "CANON", "EPSON", "BROTHER", "PHILIPS", 
+            "AOC", "VIEWSONIC", "BENQ", "ALCATROZ", "UGREEN", "BASEUS", "JBL", 
+            "SONY", "RUIJIE", "MERCUSYS", "NETGEAR", "DLINK", "CISCO", "HIKVISION", 
+            "SPC", "DAHUA", "EZVIZ"
+        }
+        unique_brands.update(additional_brands)
+        sorted_brands = sorted(unique_brands, key=len, reverse=True)
+        for brand in sorted_brands:
+            pattern = re.compile(r'\b' + re.escape(brand) + r'\b', re.IGNORECASE)
+            if pattern.search(corrected_name.upper()):
+                extracted_brand = brand
+                break
+                
+    return corrected_name, extracted_brand
+
 async def init_ml_models():
     """Initialize ML models asynchronously."""
     global tfidf_matcher, sbert_matcher
+
+    # Load Kamus brand alias mapping
+    load_kamus()
 
     try:
         logger.info("📦 Loading TF-IDF model...")
@@ -120,6 +195,90 @@ async def init_ml_models():
         logger.info("✅ SBERT loaded")
     except Exception as e:
         logger.warning(f"⚠️ SBERT init failed: {e}")
+
+    # Warm up SBERT embeddings cache from database
+    if sbert_matcher and sbert_matcher.model is not None:
+        try:
+            logger.info("🔄 Warming up SBERT embeddings cache from database...")
+            from app_backend.db.database import AsyncSessionLocal
+            import asyncio
+            async with AsyncSessionLocal() as db:
+                # 1. Load all existing embeddings from DB
+                stmt = select(ProductEmbedding)
+                result = await db.execute(stmt)
+                db_rows = result.scalars().all()
+                
+                loaded_count = 0
+                for row in db_rows:
+                    if row.embedding_sbert:
+                        emb_vec = np.array([float(x) for x in row.embedding_sbert.split(',')], dtype=np.float32)
+                        sbert_matcher.embeddings_cache[row.nama_produk] = emb_vec
+                        loaded_count += 1
+                logger.info(f"✅ Loaded {loaded_count} SBERT embeddings from database into memory cache.")
+
+                # 2. Check for missing embeddings in background
+                res_komp = await db.execute(select(DataKompetitor.nama_produk_clean).distinct())
+                res_dbklik = await db.execute(select(DataDbKlik.nama_produk_clean).distinct())
+                
+                all_names = set(res_komp.scalars().all()) | set(res_dbklik.scalars().all())
+                all_names = {n for n in all_names if n} # remove None or empty
+                
+                missing_names = list(all_names - set(sbert_matcher.embeddings_cache.keys()))
+                if missing_names:
+                    logger.info(f"Found {len(missing_names)} products with missing SBERT embeddings. Encoding in background...")
+                    asyncio.create_task(encode_and_cache_missing_embeddings(missing_names))
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to warm up SBERT embeddings cache: {e}")
+
+async def encode_and_cache_missing_embeddings(names: List[str]):
+    """Encodes names and saves them to DB in background."""
+    global sbert_matcher
+    if not sbert_matcher or not sbert_matcher.model:
+        return
+        
+    try:
+        import asyncio
+        from app_backend.db.database import AsyncSessionLocal
+        from sqlalchemy import insert
+        
+        batch_size = 500
+        for i in range(0, len(names), batch_size):
+            chunk = names[i:i+batch_size]
+            logger.info(f"Background SBERT encoding: {i}/{len(names)}...")
+            
+            loop = asyncio.get_running_loop()
+            encoded = await loop.run_in_executor(
+                None, 
+                lambda: sbert_matcher.model.encode(chunk, batch_size=64, convert_to_numpy=True)
+            )
+            
+            async with AsyncSessionLocal() as db:
+                records = []
+                for j, name in enumerate(chunk):
+                    vec = encoded[j]
+                    sbert_matcher.embeddings_cache[name] = vec
+                    serialized = ",".join(map(str, vec.tolist()))
+                    records.append({
+                        "nama_produk": name,
+                        "embedding_sbert": serialized
+                    })
+                
+                try:
+                    await db.execute(insert(ProductEmbedding), records)
+                    await db.commit()
+                except Exception as ins_err:
+                    await db.rollback()
+                    logger.warning(f"Background insert error: {ins_err}. Trying fallback...")
+                    for rec in records:
+                        try:
+                            await db.execute(insert(ProductEmbedding).values(rec))
+                            await db.commit()
+                        except Exception:
+                            await db.rollback()
+                            
+        logger.info("✅ Background SBERT encoding and caching completed!")
+    except Exception as e:
+        logger.error(f"❌ Background SBERT encoding failed: {e}")
 
 
 # Create FastAPI app
@@ -299,8 +458,17 @@ async def get_dashboard_stats(user_id: Optional[str] = None, db: AsyncSession = 
     if user_id:
         query = query.where(DataKompetitor.user_id == user_id)
 
-    result = await db.execute(query)
-    store_stats = result.fetchall()
+    try:
+        result = await db.execute(query)
+        store_stats = result.fetchall()
+    except Exception as db_err:
+        logger.error(f"Failed to fetch stats from DB: {db_err}")
+        return {
+            "total_produk": 0,
+            "total_toko": 0,
+            "toko_stats": [],
+            "error": "Database offline"
+        }
 
     total_products = sum(s.total for s in store_stats)
 
@@ -347,16 +515,36 @@ async def upload_kompetitor(
 
         processed_count = 0
         for _, row in df.iterrows():
+            nama_original = str(row['NAMA'])
+            if not nama_original or nama_original.lower() == 'nan':
+                continue
+                
+            nama_koreksi, brand_ekstraksi = apply_name_rules(nama_original)
+            
+            brand_final = brand_ekstraksi
+            if 'BRAND' in df.columns and pd.notna(row['BRAND']):
+                csv_brand = str(row['BRAND']).strip().upper()
+                if csv_brand and csv_brand != 'UNKNOWN':
+                    found_clean_brand = False
+                    for alias_regex, brand_utama in brand_map.items():
+                        clean_alias = alias_regex.replace(r'\b', '')
+                        if csv_brand == clean_alias:
+                            brand_final = brand_utama
+                            found_clean_brand = True
+                            break
+                    if not found_clean_brand:
+                        brand_final = csv_brand
+
             produk = DataKompetitor(
                 user_id=user_id,
-                nama_produk=row['NAMA'],
-                nama_produk_clean=clean_text(str(row['NAMA'])),
+                nama_produk=nama_koreksi,
+                nama_produk_clean=clean_text(nama_koreksi),
                 harga=int(row['HARGA']),
                 terjual_bln=int(row.get('TERJUAL/BLN', 0)),
                 tanggal=metadata['tanggal'],
                 nama_toko=metadata['nama_toko'],
                 status=metadata['status'],
-                brand=row.get('BRAND'),
+                brand=brand_final,
                 kategori=row.get('KATEGORI'),
                 sku=row.get('SKU')
             )
@@ -446,8 +634,12 @@ async def match_products(
         store_list = [s.strip().upper() for s in stores.split(',')]
         base_query = base_query.where(DataKompetitor.nama_toko.in_(store_list))
 
-    result = await db.execute(base_query)
-    products = result.scalars().all()
+    try:
+        result = await db.execute(base_query)
+        products = result.scalars().all()
+    except Exception as db_err:
+        logger.error(f"Database query failed in /api/match/: {db_err}")
+        raise HTTPException(status_code=503, detail="Database connection offline")
 
     if not products:
         return {"data": [], "count": 0}
@@ -479,7 +671,7 @@ async def match_products(
             # Encode query once
             query_emb = sbert_matcher.encode([query_clean])
             # Get embeddings from batch cache
-            target_embeddings = sbert_matcher.get_embeddings_batch(target_names)
+            target_embeddings = await sbert_matcher.get_embeddings_batch(target_names, db)
             sbert_scores = cosine_similarity(query_emb, target_embeddings)[0]
         except Exception as sbert_err:
             logger.warning(f"Batch SBERT calculation failed: {sbert_err}, using loop fallback")
