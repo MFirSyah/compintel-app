@@ -20,7 +20,7 @@ sys.path.insert(0, backend_dir)
 from app_backend.core.config import settings
 from app_backend.db.database import engine, Base, AsyncSessionLocal
 from app_backend.models.models import DataKompetitor, DataDbKlik, UploadHistory
-from sqlalchemy import insert
+from sqlalchemy import insert, text
 
 # Set paths
 DATA_UTAMA_DIR = os.path.join(backend_dir, "..", "DATA UTAMA")
@@ -243,7 +243,9 @@ async def main():
     print("Membuat/memastikan tabel database...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    print("Struktur tabel siap.")
+        print("Mengosongkan data lama untuk clean install...")
+        await conn.execute(text("TRUNCATE TABLE data_db_klik, data_kompetitor, upload_history RESTART IDENTITY CASCADE;"))
+    print("Struktur tabel siap & data lama telah dikosongkan.")
 
     # 2. Muat kamus
     kamus = load_kamus()
