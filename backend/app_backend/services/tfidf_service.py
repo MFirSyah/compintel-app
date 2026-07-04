@@ -169,7 +169,7 @@ class TFIDFMatcher:
         query_norm = np.sqrt(sum(v**2 for v in query_freq.values()))
         target_norm = np.sqrt(sum(v**2 for v in target_freq.values()))
 
-        if query_norm > 0 and doc_norm := target_norm:
-            return float(dot_product / (query_norm * doc_norm))
+        if query_norm > 0 and target_norm > 0:
+            return float(dot_product / (query_norm * target_norm))
         return 0.0
 
