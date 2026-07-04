@@ -436,7 +436,7 @@ async def match_products(
     user_id: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """Pencocokan produk hybrid (TF-IDF + SBERT)."""
+    """Pencocokan produk hybrid (TF-IDF + SBERT) menggunakan pemrosesan batch NumPy."""
     base_query = select(DataKompetitor)
 
     if user_id:
@@ -452,17 +452,55 @@ async def match_products(
     if not products:
         return {"data": [], "count": 0}
 
-    results = []
     query_clean = clean_text(query)
+    target_names = [product.nama_produk_clean or clean_text(product.nama_produk) for product in products]
 
-    for product in products:
-        tfidf_score = calculate_tfidf_similarity(query_clean, product.nama_produk_clean or clean_text(product.nama_produk))
-        sbert_score = calculate_sbert_similarity(query_clean, product.nama_produk_clean or clean_text(product.nama_produk))
+    # 1. BATCH TF-IDF SIMILARITY
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
+        
+        vectorizer = TfidfVectorizer(analyzer='char_wb', ngram_range=(2, 3))
+        tfidf_matrix = vectorizer.fit_transform(target_names)
+        query_vec = vectorizer.transform([query_clean])
+        tfidf_scores = cosine_similarity(query_vec, tfidf_matrix)[0]
+    except Exception as tfidf_err:
+        logger.warning(f"Batch TF-IDF calculation failed: {tfidf_err}, using loop fallback")
+        # Fallback loop
+        tfidf_scores = np.array([
+            calculate_tfidf_similarity(query_clean, name) for name in target_names
+        ], dtype=np.float32)
 
-        alpha = settings.TFIDF_ALPHA
-        hybrid_score = (alpha * tfidf_score) + ((1 - alpha) * sbert_score)
+    # 2. BATCH SBERT SIMILARITY
+    if sbert_matcher and sbert_matcher.model is not None:
+        try:
+            from sklearn.metrics.pairwise import cosine_similarity
+            
+            # Encode query once
+            query_emb = sbert_matcher.encode([query_clean])
+            # Get embeddings from batch cache
+            target_embeddings = sbert_matcher.get_embeddings_batch(target_names)
+            sbert_scores = cosine_similarity(query_emb, target_embeddings)[0]
+        except Exception as sbert_err:
+            logger.warning(f"Batch SBERT calculation failed: {sbert_err}, using loop fallback")
+            sbert_scores = np.array([
+                calculate_sbert_similarity(query_clean, name) for name in target_names
+            ], dtype=np.float32)
+    else:
+        # Fallback loop
+        sbert_scores = np.array([
+            calculate_sbert_similarity(query_clean, name) for name in target_names
+        ], dtype=np.float32)
 
-        if hybrid_score >= threshold:
+    # 3. HYBRID SCORE CALCULATION
+    alpha = settings.TFIDF_ALPHA
+    hybrid_scores = (alpha * tfidf_scores) + ((1 - alpha) * sbert_scores)
+
+    # 4. FILTER AND FORMAT RESULTS
+    results = []
+    for i, product in enumerate(products):
+        score = float(hybrid_scores[i])
+        if score >= threshold:
             results.append({
                 "id": product.id,
                 "nama_produk": product.nama_produk,
@@ -473,9 +511,9 @@ async def match_products(
                 "status": product.status,
                 "brand": product.brand,
                 "sku": product.sku,
-                "skor_tfidf": round(tfidf_score, 4),
-                "skor_sbert": round(sbert_score, 4),
-                "skor_akhir": round(hybrid_score, 4)
+                "skor_tfidf": round(float(tfidf_scores[i]), 4),
+                "skor_sbert": round(float(sbert_scores[i]), 4),
+                "skor_akhir": round(score, 4)
             })
 
     results.sort(key=lambda x: x["skor_akhir"], reverse=True)

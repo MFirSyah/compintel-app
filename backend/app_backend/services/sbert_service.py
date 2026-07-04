@@ -51,6 +51,47 @@ class SBERTMatcher:
             logger.error(f"❌ Encoding failed: {e}")
             return None
 
+    def get_embeddings_batch(self, texts: List[str]) -> np.ndarray:
+        """
+        Get SBERT embeddings for a list of texts.
+        Uses in-memory cache for texts already encoded.
+        Encodes missing texts in batch.
+        """
+        if self.model is None:
+            # Return zero vectors if SBERT is not available
+            return np.zeros((len(texts), 384), dtype=np.float32)
+
+        embeddings = [None] * len(texts)
+        missing_texts = []
+        missing_indices = []
+
+        for idx, text in enumerate(texts):
+            clean_text = text.strip()
+            if clean_text in self.embeddings_cache:
+                embeddings[idx] = self.embeddings_cache[clean_text]
+            else:
+                missing_texts.append(clean_text)
+                missing_indices.append(idx)
+
+        if missing_texts:
+            try:
+                logger.info(f"Encoding {len(missing_texts)} missing SBERT embeddings...")
+                encoded = self.model.encode(missing_texts, batch_size=256, show_progress_bar=False, convert_to_numpy=True)
+                for i, clean_text in enumerate(missing_texts):
+                    self.embeddings_cache[clean_text] = encoded[i]
+                
+                # Place back into list
+                for i, idx in enumerate(missing_indices):
+                    embeddings[idx] = encoded[i]
+            except Exception as e:
+                logger.error(f"Batch encoding failed: {e}")
+                # Fallback to zero vectors for missing
+                zero_vec = np.zeros(384, dtype=np.float32)
+                for idx in missing_indices:
+                    embeddings[idx] = zero_vec
+
+        return np.array(embeddings, dtype=np.float32)
+
     def get_similarity(self, text1: str, text2: str) -> float:
         """
         Calculate semantic similarity antara dua text.
