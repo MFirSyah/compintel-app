@@ -5,8 +5,8 @@ ENV/
 env/
 
 # ML Models & Data (Heavy Files)
-model_sbert_local/
-models/
+/model_sbert_local/
+/models/
 *.npy
 *.pkl
 *.h5
