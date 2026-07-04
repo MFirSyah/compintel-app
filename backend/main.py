@@ -16,7 +16,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Depends, He
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, text
+from sqlalchemy import select, func, and_, or_, text
 from pydantic import BaseModel
 import pandas as pd
 import numpy as np
@@ -633,6 +633,43 @@ async def match_products(
     if stores:
         store_list = [s.strip().upper() for s in stores.split(',')]
         base_query = base_query.where(DataKompetitor.nama_toko.in_(store_list))
+
+    # Stage 1: Candidate Filtering (Brand & Keyword Matching)
+    # Extract query brand and clean text
+    corrected_query, query_brand = apply_name_rules(query)
+    query_brand = query_brand.upper().strip()
+    query_clean = clean_text(corrected_query)
+    
+    # Extract keywords (length >= 3)
+    words = query_clean.split()
+    keywords = [w for w in words if len(w) >= 3]
+    
+    # Common stop words to exclude from keyword search
+    stop_words = {
+        'dan', 'dengan', 'untuk', 'yang', 'dari', 'toko', 'ready', 'habis', 
+        'original', 'promo', 'murah', 'diskon', 'sale', 'termurah', 'baru',
+        'new', 'pcs', 'pack', 'unit', 'set', 'box', 'dijual', 'jual'
+    }
+    keywords = [w for w in keywords if w not in stop_words]
+    
+    filters = []
+    
+    # Filter by brand if known (reduces search space significantly)
+    if query_brand and query_brand != "UNKNOWN":
+        filters.append(
+            or_(
+                DataKompetitor.brand == query_brand,
+                DataKompetitor.brand == "TIDAK ADA BRAND"
+            )
+        )
+        
+    # Filter by containing at least one keyword
+    if keywords:
+        keyword_conditions = [DataKompetitor.nama_produk_clean.ilike(f"%{kw}%") for kw in keywords]
+        filters.append(or_(*keyword_conditions))
+        
+    if filters:
+        base_query = base_query.where(and_(*filters))
 
     try:
         result = await db.execute(base_query)
