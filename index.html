@@ -575,7 +575,7 @@
             tfidf: { analyzer: 'char_wb', ngram_range: [2, 3], threshold: 0.67 },
             sbert: { model: 'paraphrase-multilingual-MiniLM-L12-v2', dimensions: 384, threshold: 0.84 },
             hybrid: { formula: '(TF-IDF + SBERT) / 2', default_threshold: 0.75, f1_score: '92.25%' },
-            dataPath: '../DATA/'
+            dataPath: 'data_local/'
         };
 
         // ========================================================================
@@ -830,7 +830,7 @@
         // Muat kamus brand dari KAMUS.csv
         async function loadBrandMapping() {
             try {
-                var response = await fetch('../DATA/DATA UTAMA/KAMUS.csv');
+                var response = await fetch(CONFIG.dataPath + 'KAMUS.csv');
                 var csvText = await response.text();
                 var lines = csvText.split('\n');
 
