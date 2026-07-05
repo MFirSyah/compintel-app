@@ -14,7 +14,7 @@ from typing import List, Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, text
 from pydantic import BaseModel
@@ -350,14 +350,32 @@ def parse_filename_metadata(filename: str) -> dict:
 
 @app.get("/")
 async def root():
-    """Root endpoint."""
-    return {
+    """Serve the frontend index.html if it exists, otherwise return API info."""
+    index_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "index.html"))
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+        
+    local_index = os.path.abspath(os.path.join(os.path.dirname(__file__), "index.html"))
+    if os.path.exists(local_index):
+        return FileResponse(local_index)
+        
+    return JSONResponse({
         "name": "COMPINTEL API",
         "version": "2.0.0",
         "status": "running",
         "description": "Sistem Analisis Pencocokan Produk Hybrid",
         "supabase": SUPABASE_AVAILABLE
-    }
+    })
+
+# Mount data_local static files for offline/simulated data loading
+from fastapi.staticfiles import StaticFiles
+data_local_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data_local"))
+if os.path.exists(data_local_path):
+    app.mount("/data_local", StaticFiles(directory=data_local_path), name="data_local")
+else:
+    backend_data_local = os.path.abspath(os.path.join(os.path.dirname(__file__), "data_local"))
+    if os.path.exists(backend_data_local):
+        app.mount("/data_local", StaticFiles(directory=backend_data_local), name="data_local")
 
 
 @app.get("/health")

@@ -27,4 +27,5 @@ pydantic-settings==2.1.0
 aiofiles==23.2.1
 cryptography==42.0.2
 openpyxl==3.1.2
-
+# Desktop Window
+pywebview==5.1
